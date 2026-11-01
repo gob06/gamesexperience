@@ -1,20 +1,24 @@
 # VOTE
 
-VOTE is a self-hosted live polling app. Create a question, display its QR code, and let people vote from their phones. Polls, individual votes, and answer option images are stored in a local SQLite database.
+VOTE is a self-hosted live polling app. Create a question, display its QR code, and let people vote from their phones. Polls, individual votes, and answer option images are stored in a MariaDB database.
 
 ## Requirements
 
-- Node.js 22.13+ (uses the built-in `node:sqlite` module)
+- Node.js 18+ (24 recommended)
 - npm
+- MariaDB 10.5+ (a database and a user with full rights on it)
 
 ## Run locally
 
+Create a database and set its connection string (or `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`); the tables are created automatically on first start:
+
 ```powershell
+$env:DATABASE_URL = 'mysql://vote:password@127.0.0.1:3306/vote'
 npm install
 npm run dev
 ```
 
-Open the Vite URL printed in the terminal, normally `http://localhost:5173`, and sign in to the activity dashboard. Choose **Q&A** to create a question with predefined answers the audience can select; the host marks exactly one answer as correct before creating it. See [Q&A game](#qa-game) for the full flow. A Q&A question can be text only, or an uploaded image (JPEG, PNG, or WebP, 5 MB max) with an optional caption. Choose **QR Voting** to manage regular polls. Both use the poll dashboard and live QR voting flow. Choose **Vanishing Tic-Tac-Toe** to open game room management at `/game`, or **Selfie Cam** to create a guest photo-upload QR and moderate full-screen submissions at `/selfie`. The voting management dashboard is also available at `/voting`. The API runs on port `4179`; the SQLite database is created at `data/roomvote.sqlite`.
+Open the Vite URL printed in the terminal, normally `http://localhost:5173`, and sign in to the activity dashboard. Choose **Q&A** to create a question with predefined answers the audience can select; the host marks exactly one answer as correct before creating it. See [Q&A game](#qa-game) for the full flow. A Q&A question can be text only, or an uploaded image (JPEG, PNG, or WebP, 5 MB max) with an optional caption. Choose **QR Voting** to manage regular polls. Both use the poll dashboard and live QR voting flow. Choose **Vanishing Tic-Tac-Toe** to open game room management at `/game`, or **Selfie Cam** to create a guest photo-upload QR and moderate full-screen submissions at `/selfie`. The voting management dashboard is also available at `/voting`. The API runs on port `4179`; the MariaDB tables are created on first start from `db/mariadb-schema.sql`.
 
 ## Admin access
 
@@ -22,7 +26,7 @@ On first visit, create the initial admin account. Usernames must be 3–40 lette
 
 ## Vanishing Tic-Tac-Toe
 
-Admins can manage up to three active Vanishing Tic-Tac-Toe rooms at `/game`. Use **Game Appearance & Theme** there to separately customize the game title, images, colors, background, layout, and effects; save a private draft, preview desktop/mobile, and publish changes only to game pages. This game theme does not change the main site or voting theme. Give each room a name and optionally upload custom X and O images (JPEG, PNG, or WebP, up to 5 MB each); the images are validated by the server, stored in SQLite, and shown on both player boards and the admin spectator board. Each room has its own QR code for both players to scan; the first player is X and the second is O. Admins can reopen a room QR code and open a read-only spectator view; spectator access requires the admin account and does not occupy a player slot. Admins can close rooms to free a slot; closing a room disconnects both players. Both boards synchronize through the server. Each player keeps up to three active marks during play; on a non-winning fourth move in an empty square, their oldest mark disappears. If the move makes three-in-a-row, the winning marks stay on the board and the game ends. After a match, both players can vote on a rematch during a shared 20-second countdown; the same room restarts only if both agree. A decline or timeout leaves the finished game in place. Rooms with no activity expire after 24 hours and no longer count against the three-room limit. For phones to join a locally hosted game, all devices need to be on the same Wi-Fi network.
+Admins can manage up to three active Vanishing Tic-Tac-Toe rooms at `/game`. Use **Game Appearance & Theme** there to separately customize the game title, images, colors, background, layout, and effects; save a private draft, preview desktop/mobile, and publish changes only to game pages. This game theme does not change the main site or voting theme. Give each room a name and optionally upload custom X and O images (JPEG, PNG, or WebP, up to 5 MB each); the images are validated by the server, stored in MariaDB, and shown on both player boards and the admin spectator board. Each room has its own QR code for both players to scan; the first player is X and the second is O. Admins can reopen a room QR code and open a read-only spectator view; spectator access requires the admin account and does not occupy a player slot. Admins can close rooms to free a slot; closing a room disconnects both players. Both boards synchronize through the server. Each player keeps up to three active marks during play; on a non-winning fourth move in an empty square, their oldest mark disappears. If the move makes three-in-a-row, the winning marks stay on the board and the game ends. After a match, both players can vote on a rematch during a shared 20-second countdown; the same room restarts only if both agree. A decline or timeout leaves the finished game in place. Rooms with no activity expire after 24 hours and no longer count against the three-room limit. For phones to join a locally hosted game, all devices need to be on the same Wi-Fi network.
 
 ## Selfie Cam
 
@@ -52,18 +56,18 @@ A Q&A is a quiz: one question, up to 8 answers, exactly one correct. Any partici
 
 **Security:** the correct answer, winners and statistics are only returned to signed-in users; winner is decided on the server; admin and host actions (create, edit, delete, settings, exports, verification, video uploads) are written to `audit_logs` (admins can read them at `GET /api/admin/audit-logs`); login and audience endpoints are rate-limited per IP. Because a venue's Wi-Fi often shares one IP, the audience limit is generous; set `QA_RATE_LIMIT_PER_MINUTE` (default 3000) to tune it.
 
-**Deviations from the "preferred" stack:** the runtime stack is React + Vite, Express and SQLite (`node:sqlite`), with server-sent events instead of Socket.IO and files/images stored in SQLite and `data/`. `db/postgres-schema.sql` and `npm run migrate:postgres` are provided for a one-time PostgreSQL import, but the server does not run on PostgreSQL yet.
+**Stack:** React + Vite, Express and MariaDB (`mysql2`), with server-sent events instead of Socket.IO and images stored in MariaDB (videos and theme images are files under `DATA_DIR`).
 
 ### Installation and deployment
 
-1. Install Node.js 22.5+ (24 recommended) and run `npm install`.
+1. Install Node.js (24 recommended), create a MariaDB 10.5+ database and user, and run `npm install`.
 2. Development: `npm run dev` (Vite on `5173`, API on `4179`). Production: `npm run build` then `npm start`, which serves the app and API on `PORT` (default `4179`).
 3. Open the site and create the first admin account on the setup screen. Admins can add hosts under **Manage users**.
 4. Upload the Q&A advertisement (MP4 recommended) under **Videos**.
 5. Put the app behind HTTPS (camera scanning and secure cookies need it). If a reverse proxy terminates TLS, set `TRUST_PROXY_HOPS`. Disable response buffering for `/api/polls/*/monitor/stream` (nginx: `proxy_buffering off`).
-6. Persist and back up `DATA_DIR` (default `./data`): the SQLite database, `ad-videos` and `theme-assets`. Run a single server instance, since SQLite and the in-memory rate limiter and event bus are per process.
+6. Persist and back up `DATA_DIR` (default `./data`, holds `ad-videos` and `theme-assets`) together with the MariaDB database. Run a single server instance, since the in-memory rate limiter and event bus are per process. The MariaDB `max_allowed_packet` must be at least 8 MB (images are up to 5 MB).
 
-Environment variables: `PORT`, `DATA_DIR`, `TRUST_PROXY_HOPS`, `QA_RATE_LIMIT_PER_MINUTE`, `VOTING_SESSION_DURATION_SECONDS`, `AD_VIDEO_MAX_BYTES`, `THEME_IMAGE_MAX_BYTES`.
+Environment variables: `DATABASE_URL` (or `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`), `DB_CONNECTION_LIMIT`, `PORT`, `DATA_DIR`, `TRUST_PROXY_HOPS`, `QA_RATE_LIMIT_PER_MINUTE`, `VOTING_SESSION_DURATION_SECONDS`, `AD_VIDEO_MAX_BYTES`, `THEME_IMAGE_MAX_BYTES`.
 
 ### Admin quick guide
 
@@ -74,13 +78,13 @@ Environment variables: `PORT`, `DATA_DIR`, `TRUST_PROXY_HOPS`, `QA_RATE_LIMIT_PE
 
 ## Video ads
 
-Admins can open **Videos** from the dashboard (`/admin/videos`) and upload one MP4 or WebM each for polls, Q&A, Vanishing Tic-Tac-Toe, and Selfie Cam. The poll video plays full-screen on a participant's phone right after their vote is recorded; the Q&A video plays the same way after a participant presses **Enter** on a Q&A answer (Q&A uses its own slot, not the poll video); the game video plays for both players when a match ends; the selfie video plays on a guest's phone right after they send their photo. Viewers cannot skip, seek, pause, or close the video; it closes when it finishes (or if it fails to load). With no video uploaded, nothing plays. Files are stored under `data/ad-videos` (back it up with the SQLite database). Set `AD_VIDEO_MAX_BYTES` to change the 200 MB upload limit (1 byte–1 GB). The game rematch countdown is a fixed 20 seconds and keeps running while the video plays.
+Admins can open **Videos** from the dashboard (`/admin/videos`) and upload one MP4 or WebM each for polls, Q&A, Vanishing Tic-Tac-Toe, and Selfie Cam. The poll video plays full-screen on a participant's phone right after their vote is recorded; the Q&A video plays the same way after a participant presses **Enter** on a Q&A answer (Q&A uses its own slot, not the poll video); the game video plays for both players when a match ends; the selfie video plays on a guest's phone right after they send their photo. Viewers cannot skip, seek, pause, or close the video; it closes when it finishes (or if it fails to load). With no video uploaded, nothing plays. Files are stored under `data/ad-videos` (back it up together with the MariaDB database). Set `AD_VIDEO_MAX_BYTES` to change the 200 MB upload limit (1 byte–1 GB). The game rematch countdown is a fixed 20 seconds and keeps running while the video plays.
 
 ## Appearance & Theme Settings
 
 Admins can open **Appearance & Theme Settings** from the dashboard. Set the event title, logo, banner, global background, and separate voting, results, and admin backgrounds; adjust colors, image positioning and display mode, overlay, card corners, and glow; and preview desktop and mobile layouts. Use **Save draft** to persist private changes and **Publish theme** to apply them to new and open audience pages. Restoring defaults requires confirmation and does not change polls or votes.
 
-Theme images are limited to JPEG, PNG, or WebP, 50 MB per file by default, 12,000 pixels per side, and 40 megapixels. Set `THEME_IMAGE_MAX_BYTES` to configure the upload limit (1 byte–200 MB). SVG is rejected. The server verifies image signatures and dimensions, rate-limits uploads, and stores files under `data/theme-assets` outside the public static directory. Draft image URLs and theme-management APIs require an administrator session; public image URLs resolve only assets referenced by the published theme. Images are preserved as uploaded (not resized). Back up `data/roomvote.sqlite` and `data/theme-assets` together; losing the asset folder can leave theme references without their image files.
+Theme images are limited to JPEG, PNG, or WebP, 50 MB per file by default, 12,000 pixels per side, and 40 megapixels. Set `THEME_IMAGE_MAX_BYTES` to configure the upload limit (1 byte–200 MB). SVG is rejected. The server verifies image signatures and dimensions, rate-limits uploads, and stores files under `data/theme-assets` outside the public static directory. Draft image URLs and theme-management APIs require an administrator session; public image URLs resolve only assets referenced by the published theme. Images are preserved as uploaded (not resized). Back up the MariaDB database and `data/theme-assets` together; losing the asset folder can leave theme references without their image files.
 
 The first server start imports existing polls and vote counts from `data/polls.json`; that legacy file is kept unchanged as a backup. The legacy format did not record which option each voter selected.
 
@@ -93,19 +97,17 @@ npm run build
 npm start
 ```
 
-The production server serves the built frontend and API on port `4179`. Set `PORT` to change the API port. Poll records and answer option images persist in the SQLite database.
+The production server serves the built frontend and API on port `4179`. Set `PORT` to change the API port. Poll records and answer option images persist in the MariaDB database.
 
-## PostgreSQL migration preparation
+## Importing existing SQLite data
 
-The application currently runs on SQLite; adding a PostgreSQL database alone does not switch the running server to PostgreSQL. `db/postgres-schema.sql` defines the corresponding PostgreSQL tables, and `npm run migrate:postgres` imports an existing SQLite database into an empty PostgreSQL database. The importer keeps IDs and vote data, imports binary poll/game images, skips retired `phone_hash` columns, and copies theme image files to a directory you specify.
-
-Back up the SQLite database and theme assets before migrating. Set `DATABASE_URL` to the PostgreSQL connection string. If the SQLite database has theme assets, also set `THEME_ASSETS_DESTINATION` to the destination directory for those image files. Optionally set `SQLITE_PATH` if the source database is not `data/roomvote.sqlite`. Then run:
+If you used an earlier SQLite version, `npm run migrate:mariadb` imports `data/roomvote.sqlite` into an empty MariaDB database (it creates the tables, keeps IDs and vote data, and copies theme image files). Back up first, then set `DATABASE_URL` to the destination. If the SQLite database has theme assets, also set `THEME_ASSETS_DESTINATION` to the directory for those image files (normally `<DATA_DIR>/theme-assets`). Optionally set `SQLITE_PATH` if the source is elsewhere. The importer needs Node.js 22.13+ (it reads SQLite with `node:sqlite`).
 
 ```powershell
-npm run migrate:postgres
+npm run migrate:mariadb
 ```
 
-The destination PostgreSQL database must be empty. This is a one-time data import, not a live synchronization tool. The current server still uses SQLite at runtime; PostgreSQL runtime support must be implemented and validated before configuring a production service to start the app against PostgreSQL. Theme image files also need persistent storage (or a future object-storage integration) in production.
+This is a one-time import, not live synchronization. Ad videos in `data/ad-videos` must be copied separately.
 
 ## Notes
 

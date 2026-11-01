@@ -1,11 +1,12 @@
 import express from 'express'
+import './async-handlers.js'
 import multer from 'multer'
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { networkInterfaces } from 'node:os'
 import path from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
+import { createDatabase, readDatabaseConfig } from './db.js'
 import { registerQaRoutes } from './qa.js'
 import { rateLimit } from './rate-limit.js'
 
@@ -30,7 +31,6 @@ if (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 0 || trustedPr
 app.set('trust proxy', trustedProxyHops)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDirectory = path.resolve(process.env.DATA_DIR || path.join(root, 'data'))
-const databaseFile = path.join(dataDirectory, 'roomvote.sqlite')
 const legacyPollsFile = path.join(dataDirectory, 'polls.json')
 const themeAssetsDirectory = path.join(dataDirectory, 'theme-assets')
 const adVideosDirectory = path.join(dataDirectory, 'ad-videos')
@@ -38,251 +38,18 @@ const adVideosDirectory = path.join(dataDirectory, 'ad-videos')
 mkdirSync(dataDirectory, { recursive: true })
 mkdirSync(themeAssetsDirectory, { recursive: true })
 mkdirSync(adVideosDirectory, { recursive: true })
-const database = new DatabaseSync(databaseFile)
-database.exec(`
-  PRAGMA foreign_keys = ON;
-  PRAGMA journal_mode = WAL;
-  PRAGMA busy_timeout = 5000;
-  CREATE TABLE IF NOT EXISTS ad_videos (
-    kind TEXT PRIMARY KEY CHECK (kind IN ('poll', 'qa', 'game', 'selfie')),
-    file_name TEXT NOT NULL,
-    original_name TEXT NOT NULL,
-    mime_type TEXT NOT NULL,
-    size INTEGER NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS polls (
-    id TEXT PRIMARY KEY,
-    question TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    logo_mime_type TEXT,
-    logo BLOB,
-    is_qa INTEGER NOT NULL DEFAULT 0,
-    correct_option_id TEXT,
-    question_image_mime_type TEXT,
-    question_image BLOB
-  );
-  CREATE TABLE IF NOT EXISTS poll_options (
-    id TEXT PRIMARY KEY,
-    poll_id TEXT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
-    label TEXT NOT NULL,
-    position INTEGER NOT NULL,
-    votes INTEGER NOT NULL DEFAULT 0 CHECK (votes >= 0),
-    image_mime_type TEXT,
-    image BLOB
-  );
-  CREATE INDEX IF NOT EXISTS poll_options_poll_id ON poll_options(poll_id, position);
-  CREATE TABLE IF NOT EXISTS poll_voters (
-    poll_id TEXT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
-    voter_id TEXT NOT NULL,
-    option_id TEXT REFERENCES poll_options(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL,
-    first_name TEXT,
-    ticket_number TEXT,
-    PRIMARY KEY (poll_id, voter_id)
-  );
-  CREATE TABLE IF NOT EXISTS poll_voting_sessions (
-    id TEXT PRIMARY KEY,
-    poll_id TEXT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL UNIQUE,
-    expires_at TEXT NOT NULL,
-    consumed_at TEXT
-  );
-  CREATE INDEX IF NOT EXISTS poll_voting_sessions_expiry ON poll_voting_sessions(expires_at);
-  CREATE TABLE IF NOT EXISTS game_rooms (
-    id TEXT PRIMARY KEY,
-    room_name TEXT NOT NULL DEFAULT 'Game room',
-    player_x_token_hash TEXT NOT NULL,
-    player_o_token_hash TEXT,
-    player_x_name TEXT NOT NULL,
-    player_o_name TEXT,
-    status TEXT NOT NULL CHECK (status IN ('waiting', 'playing', 'finished')),
-    board_json TEXT NOT NULL,
-    history_x_json TEXT NOT NULL,
-    history_o_json TEXT NOT NULL,
-    next_player TEXT NOT NULL CHECK (next_player IN ('X', 'O')),
-    winner TEXT CHECK (winner IN ('X', 'O')),
-    x_image_mime_type TEXT,
-    x_image BLOB,
-    o_image_mime_type TEXT,
-    o_image BLOB,
-    rematch_deadline TEXT,
-    rematch_x_vote INTEGER,
-    rematch_o_vote INTEGER,
-    revision INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS game_rooms_updated_at ON game_rooms(updated_at);
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    password_salt TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'host')),
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
-  CREATE TABLE IF NOT EXISTS theme_settings (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    draft_json TEXT NOT NULL,
-    published_json TEXT NOT NULL,
-    updated_by TEXT,
-    updated_at TEXT NOT NULL,
-    published_by TEXT,
-    published_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS game_theme_settings (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    draft_json TEXT NOT NULL,
-    published_json TEXT NOT NULL,
-    updated_by TEXT,
-    updated_at TEXT NOT NULL,
-    published_by TEXT,
-    published_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS selfie_sessions (
-    id TEXT PRIMARY KEY,
-    join_token_hash TEXT NOT NULL UNIQUE,
-    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    closed_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS selfie_submissions (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES selfie_sessions(id) ON DELETE CASCADE,
-    image_mime_type TEXT NOT NULL,
-    image BLOB NOT NULL,
-    file_name TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'approved')),
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS selfie_submissions_session_status
-    ON selfie_submissions(session_id, status, created_at);
-  CREATE TABLE IF NOT EXISTS theme_assets (
-    id TEXT PRIMARY KEY,
-    file_name TEXT NOT NULL,
-    mime_type TEXT NOT NULL,
-    size_bytes INTEGER NOT NULL,
-    width INTEGER NOT NULL,
-    height INTEGER NOT NULL,
-    uploaded_by TEXT NOT NULL REFERENCES users(id),
-    uploaded_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS theme_audit_logs (
-    id TEXT PRIMARY KEY,
-    administrator_id TEXT NOT NULL,
-    administrator_name TEXT NOT NULL,
-    action TEXT NOT NULL,
-    details TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-`)
-const gameRoomColumns = new Set(database.prepare('PRAGMA table_info(game_rooms)').all().map((column) => column.name))
-if (!gameRoomColumns.has('room_name')) database.exec("ALTER TABLE game_rooms ADD COLUMN room_name TEXT NOT NULL DEFAULT 'Game room'")
-if (!gameRoomColumns.has('x_image_mime_type')) database.exec('ALTER TABLE game_rooms ADD COLUMN x_image_mime_type TEXT')
-if (!gameRoomColumns.has('x_image')) database.exec('ALTER TABLE game_rooms ADD COLUMN x_image BLOB')
-if (!gameRoomColumns.has('o_image_mime_type')) database.exec('ALTER TABLE game_rooms ADD COLUMN o_image_mime_type TEXT')
-if (!gameRoomColumns.has('o_image')) database.exec('ALTER TABLE game_rooms ADD COLUMN o_image BLOB')
-if (!gameRoomColumns.has('rematch_deadline')) database.exec('ALTER TABLE game_rooms ADD COLUMN rematch_deadline TEXT')
-if (!gameRoomColumns.has('rematch_x_vote')) database.exec('ALTER TABLE game_rooms ADD COLUMN rematch_x_vote INTEGER')
-if (!gameRoomColumns.has('rematch_o_vote')) database.exec('ALTER TABLE game_rooms ADD COLUMN rematch_o_vote INTEGER')
-database.prepare('DELETE FROM game_rooms WHERE updated_at <= ?')
-  .run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(new Date().toISOString())
+const database = createDatabase(readDatabaseConfig())
+await database.initializeSchema()
+const inTransaction = (action) => database.transaction(action)
+
+const gameRoomRetentionMs = 24 * 60 * 60 * 1000
+await database.prepare('DELETE FROM game_rooms WHERE updated_at <= ?').run(new Date(Date.now() - gameRoomRetentionMs).toISOString())
+await database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(new Date().toISOString())
 const selfieCleanupTimer = setInterval(() => {
   database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(new Date().toISOString())
+    .catch((error) => console.error('Selfie session cleanup failed:', error))
 }, 15 * 60 * 1000)
 selfieCleanupTimer.unref()
-const votingSessionColumns = new Set(database.prepare('PRAGMA table_info(poll_voting_sessions)').all().map((column) => column.name))
-const voterColumns = new Set(database.prepare('PRAGMA table_info(poll_voters)').all().map((column) => column.name))
-if (!voterColumns.has('voting_session_id')) {
-  database.exec('ALTER TABLE poll_voters ADD COLUMN voting_session_id TEXT REFERENCES poll_voting_sessions(id) ON DELETE SET NULL')
-}
-if (!voterColumns.has('first_name')) database.exec('ALTER TABLE poll_voters ADD COLUMN first_name TEXT')
-if (!voterColumns.has('ticket_number')) database.exec('ALTER TABLE poll_voters ADD COLUMN ticket_number TEXT')
-database.exec('CREATE UNIQUE INDEX IF NOT EXISTS poll_voters_voting_session_id ON poll_voters(voting_session_id) WHERE voting_session_id IS NOT NULL')
-if (votingSessionColumns.has('phone_hash') || voterColumns.has('phone_hash')) {
-  const migration = ['PRAGMA secure_delete = ON;', 'DROP INDEX IF EXISTS poll_voters_phone_hash;']
-  if (voterColumns.has('phone_hash')) migration.push('UPDATE poll_voters SET phone_hash = NULL WHERE phone_hash IS NOT NULL;', 'ALTER TABLE poll_voters DROP COLUMN phone_hash;')
-  if (votingSessionColumns.has('phone_hash')) migration.push('UPDATE poll_voting_sessions SET phone_hash = NULL WHERE phone_hash IS NOT NULL;', 'ALTER TABLE poll_voting_sessions DROP COLUMN phone_hash;')
-  migration.push('PRAGMA secure_delete = OFF;')
-  database.exec(migration.join('\n'))
-  database.exec('PRAGMA wal_checkpoint(TRUNCATE)')
-}
-const selfieTable = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'selfies'").get()
-if (selfieTable) database.exec('PRAGMA secure_delete = ON; DROP TABLE selfies; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);')
-const adVideosTable = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ad_videos'").get()
-if (adVideosTable && !adVideosTable.sql.includes("'qa'")) {
-  database.exec(`
-    ALTER TABLE ad_videos RENAME TO ad_videos_old;
-    CREATE TABLE ad_videos (
-      kind TEXT PRIMARY KEY CHECK (kind IN ('poll', 'qa', 'game', 'selfie')),
-      file_name TEXT NOT NULL,
-      original_name TEXT NOT NULL,
-      mime_type TEXT NOT NULL,
-      size INTEGER NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    INSERT INTO ad_videos SELECT kind, file_name, original_name, mime_type, size, updated_at FROM ad_videos_old;
-    DROP TABLE ad_videos_old;
-  `)
-}
-const pollColumns = new Set(database.prepare('PRAGMA table_info(polls)').all().map((column) => column.name))
-if (!pollColumns.has('logo_mime_type')) database.exec('ALTER TABLE polls ADD COLUMN logo_mime_type TEXT')
-if (!pollColumns.has('logo')) database.exec('ALTER TABLE polls ADD COLUMN logo BLOB')
-if (!pollColumns.has('voting_enabled')) database.exec('ALTER TABLE polls ADD COLUMN voting_enabled INTEGER NOT NULL DEFAULT 1')
-if (!pollColumns.has('video_enabled')) database.exec('ALTER TABLE polls ADD COLUMN video_enabled INTEGER NOT NULL DEFAULT 1')
-if (!pollColumns.has('is_qa')) database.exec('ALTER TABLE polls ADD COLUMN is_qa INTEGER NOT NULL DEFAULT 0')
-if (!pollColumns.has('correct_option_id')) database.exec('ALTER TABLE polls ADD COLUMN correct_option_id TEXT')
-if (!pollColumns.has('question_image_mime_type')) database.exec('ALTER TABLE polls ADD COLUMN question_image_mime_type TEXT')
-if (!pollColumns.has('question_image')) database.exec('ALTER TABLE polls ADD COLUMN question_image BLOB')
-const optionColumns = new Set(database.prepare('PRAGMA table_info(poll_options)').all().map((column) => column.name))
-if (!optionColumns.has('image_mime_type')) database.exec('ALTER TABLE poll_options ADD COLUMN image_mime_type TEXT')
-if (!optionColumns.has('image')) database.exec('ALTER TABLE poll_options ADD COLUMN image BLOB')
-if (!pollColumns.has('reveal_correct')) database.exec('ALTER TABLE polls ADD COLUMN reveal_correct INTEGER NOT NULL DEFAULT 0')
-for (const [column, type] of [['full_name', 'TEXT'], ['ticket_number', 'TEXT'], ['ticket_key', 'TEXT'], ['registered_at', 'TEXT']]) {
-  if (!votingSessionColumns.has(column)) database.exec(`ALTER TABLE poll_voting_sessions ADD COLUMN ${column} ${type}`)
-}
-database.exec('CREATE UNIQUE INDEX IF NOT EXISTS poll_voting_sessions_ticket ON poll_voting_sessions(poll_id, ticket_key) WHERE ticket_key IS NOT NULL')
-if (!voterColumns.has('is_correct')) {
-  database.exec('ALTER TABLE poll_voters ADD COLUMN is_correct INTEGER NOT NULL DEFAULT 0')
-  database.exec('UPDATE poll_voters SET is_correct = 1 WHERE option_id IS NOT NULL AND option_id = (SELECT correct_option_id FROM polls WHERE polls.id = poll_voters.poll_id)')
-}
-if (!voterColumns.has('verification_status')) database.exec("ALTER TABLE poll_voters ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'pending'")
-if (!voterColumns.has('verified_by')) database.exec('ALTER TABLE poll_voters ADD COLUMN verified_by TEXT')
-if (!voterColumns.has('verified_at')) database.exec('ALTER TABLE poll_voters ADD COLUMN verified_at TEXT')
-database.exec(`
-  CREATE TABLE IF NOT EXISTS ad_playbacks (
-    id TEXT PRIMARY KEY,
-    poll_id TEXT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
-    voting_session_id TEXT NOT NULL UNIQUE REFERENCES poll_voting_sessions(id) ON DELETE CASCADE,
-    ad_kind TEXT NOT NULL,
-    ad_id TEXT NOT NULL,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    status TEXT NOT NULL DEFAULT 'started' CHECK (status IN ('started', 'completed')),
-    max_position REAL NOT NULL DEFAULT 0
-  );
-  CREATE INDEX IF NOT EXISTS ad_playbacks_poll ON ad_playbacks(poll_id);
-  CREATE TABLE IF NOT EXISTS audit_logs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT,
-    username TEXT,
-    action TEXT NOT NULL,
-    target_type TEXT,
-    target_id TEXT,
-    details TEXT,
-    ip_address TEXT,
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS audit_logs_created ON audit_logs(created_at);
-`)
 
 app.use((_request, response, next) => {
   response.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'SAMEORIGIN' })
@@ -291,7 +58,7 @@ app.use((_request, response, next) => {
 app.use(express.json({ limit: '32kb' }))
 
 function audit(request, action, targetType, targetId, details = {}) {
-  database.prepare('INSERT INTO audit_logs (id, user_id, username, action, target_type, target_id, details, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  return database.prepare('INSERT INTO audit_logs (id, user_id, username, action, target_type, target_id, details, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(randomUUID(), request.user?.id ?? null, request.user?.username ?? null, action, targetType, targetId, JSON.stringify(details), request.ip, new Date().toISOString())
 }
 
@@ -319,19 +86,19 @@ app.get('/api/network-addresses', (_request, response) => {
   response.json({ addresses })
 })
 
-const selectPoll = database.prepare("SELECT id, question, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, CASE WHEN logo IS NULL THEN NULL ELSE '/api/polls/' || id || '/logo' END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE '/api/polls/' || id || '/question-image' END AS questionImageUrl FROM polls WHERE id = ?")
-const selectQaWinner = database.prepare('SELECT v.voter_id AS voterId, v.first_name AS firstName, v.ticket_number AS ticketNumber, o.label AS answer FROM poll_voters v JOIN poll_options o ON o.id = v.option_id WHERE v.poll_id = ? AND v.is_correct = 1 ORDER BY v.created_at, v.rowid LIMIT 1')
-const selectQaStats = database.prepare('SELECT (SELECT COUNT(*) FROM poll_voting_sessions WHERE poll_id = ?1 AND ticket_key IS NOT NULL) AS participants, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ?1 AND option_id IS NOT NULL) AS submissions, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ?1 AND is_correct = 1) AS winners')
-const selectOptions = database.prepare("SELECT id, label, votes, CASE WHEN image IS NULL THEN NULL ELSE '/api/poll-options/' || id || '/image' END AS imageUrl FROM poll_options WHERE poll_id = ? ORDER BY position")
+const selectPoll = database.prepare("SELECT id, question, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/logo') END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/question-image') END AS questionImageUrl FROM polls WHERE id = ?")
+const selectQaWinner = database.prepare('SELECT v.voter_id AS voterId, v.first_name AS firstName, v.ticket_number AS ticketNumber, o.label AS answer FROM poll_voters v JOIN poll_options o ON o.id = v.option_id WHERE v.poll_id = ? AND v.is_correct = 1 ORDER BY v.created_at, v.seq LIMIT 1')
+const selectQaStats = database.prepare('SELECT (SELECT COUNT(*) FROM poll_voting_sessions WHERE poll_id = ? AND ticket_key IS NOT NULL) AS participants, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND option_id IS NOT NULL) AS submissions, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND is_correct = 1) AS winners')
+const selectOptions = database.prepare("SELECT id, label, votes, CASE WHEN image IS NULL THEN NULL ELSE CONCAT('/api/poll-options/', id, '/image') END AS imageUrl FROM poll_options WHERE poll_id = ? ORDER BY `position`")
 
 // The correct answer, winners, and statistics are only included for signed-in hosts (admin = true); audience requests never see them.
-function getPoll(id, { admin = false } = {}) {
-  const { correctOptionId, revealCorrect, ...poll } = selectPoll.get(id) ?? {}
+async function getPoll(id, { admin = false } = {}) {
+  const { correctOptionId, revealCorrect, ...poll } = (await selectPoll.get(id)) ?? {}
   if (!poll.id) return null
-  const base = { ...poll, isQa: Boolean(poll.isQa), votingEnabled: Boolean(poll.votingEnabled), videoEnabled: Boolean(poll.videoEnabled), options: selectOptions.all(id) }
+  const base = { ...poll, isQa: Boolean(poll.isQa), votingEnabled: Boolean(poll.votingEnabled), videoEnabled: Boolean(poll.videoEnabled), options: await selectOptions.all(id) }
   if (!admin || !base.isQa) return base
-  const winner = selectQaWinner.get(id)
-  const stats = selectQaStats.get(id)
+  const winner = await selectQaWinner.get(id)
+  const stats = await selectQaStats.get(id, id, id)
   return {
     ...base,
     revealCorrect: Boolean(revealCorrect),
@@ -341,20 +108,10 @@ function getPoll(id, { admin = false } = {}) {
   }
 }
 
-function listPolls() {
-  return database.prepare('SELECT id FROM polls ORDER BY created_at DESC').all().map(({ id }) => getPoll(id, { admin: true }))
-}
-
-function inTransaction(action) {
-  database.exec('BEGIN IMMEDIATE')
-  try {
-    const result = action()
-    database.exec('COMMIT')
-    return result
-  } catch (error) {
-    database.exec('ROLLBACK')
-    throw error
-  }
+async function listPolls() {
+  const polls = []
+  for (const { id } of await database.prepare('SELECT id FROM polls ORDER BY created_at DESC').all()) polls.push(await getPoll(id, { admin: true }))
+  return polls
 }
 
 function hasValidImageSignature(mimeType, image) {
@@ -371,8 +128,8 @@ const defaultTheme = {
   background: { position: 'center', size: 'cover', repeat: 'no-repeat', opacity: 1, overlay: 0.35, borderRadius: 8, glow: 0.2 },
 }
 
-database.prepare(`
-  INSERT OR IGNORE INTO theme_settings (id, draft_json, published_json, updated_at)
+await database.prepare(`
+  INSERT IGNORE INTO theme_settings (id, draft_json, published_json, updated_at)
   VALUES (1, ?, ?, ?)
 `).run(JSON.stringify(defaultTheme), JSON.stringify(defaultTheme), new Date().toISOString())
 
@@ -380,8 +137,8 @@ const defaultGameTheme = {
   ...defaultTheme,
   eventTitle: 'Vanishing Tic-Tac-Toe',
 }
-database.prepare(`
-  INSERT OR IGNORE INTO game_theme_settings (id, draft_json, published_json, updated_at)
+await database.prepare(`
+  INSERT IGNORE INTO game_theme_settings (id, draft_json, published_json, updated_at)
   VALUES (1, ?, ?, ?)
 `).run(JSON.stringify(defaultGameTheme), JSON.stringify(defaultGameTheme), new Date().toISOString())
 
@@ -411,18 +168,18 @@ function getThemeConfig(json) {
 }
 
 function auditThemeChange(user, action, details = {}) {
-  database.prepare('INSERT INTO theme_audit_logs (id, administrator_id, administrator_name, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+  return database.prepare('INSERT INTO theme_audit_logs (id, administrator_id, administrator_name, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?)')
     .run(randomUUID(), user.id, user.username, action, JSON.stringify(details), new Date().toISOString())
 }
 
 function auditGameThemeChange(user, action, details = {}) {
-  database.prepare('INSERT INTO theme_audit_logs (id, administrator_id, administrator_name, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+  return database.prepare('INSERT INTO theme_audit_logs (id, administrator_id, administrator_name, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?)')
     .run(randomUUID(), user.id, user.username, `game-theme.${action}`, JSON.stringify(details), new Date().toISOString())
 }
 
-function getReferencedThemeAssetIds() {
-  const settings = selectThemeSettings.get()
-  const gameSettings = selectGameThemeSettings.get()
+async function getReferencedThemeAssetIds() {
+  const settings = await selectThemeSettings.get()
+  const gameSettings = await selectGameThemeSettings.get()
   return new Set(
     [settings, gameSettings]
       .flatMap((entry) => ['draft', 'published'].flatMap((key) => Object.values(getThemeConfig(entry[key]).assets)))
@@ -430,13 +187,23 @@ function getReferencedThemeAssetIds() {
   )
 }
 
-function removeUnusedThemeAsset(id) {
-  if (getReferencedThemeAssetIds().has(id)) return false
-  const asset = database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(id)
+async function removeUnusedThemeAsset(id) {
+  if ((await getReferencedThemeAssetIds()).has(id)) return false
+  const asset = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(id)
   if (!asset) return false
-  database.prepare('DELETE FROM theme_assets WHERE id = ?').run(id)
+  await database.prepare('DELETE FROM theme_assets WHERE id = ?').run(id)
   const filePath = path.join(themeAssetsDirectory, asset.fileName)
   if (existsSync(filePath)) unlinkSync(filePath)
+  return true
+}
+
+async function themeAssetsAreValid(assets, keys) {
+  if (!assets) return false
+  for (const key of keys) {
+    const value = assets[key]
+    if (value === null) continue
+    if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value) || !(await selectThemeAsset.get(value))) return false
+  }
   return true
 }
 
@@ -469,22 +236,22 @@ function getImageDimensions(mimeType, image) {
   return null
 }
 
-function getPublicTheme() {
-  const settings = selectThemeSettings.get()
+async function getPublicTheme() {
+  const settings = await selectThemeSettings.get()
   const config = getThemeConfig(settings.published)
   const assetUrls = {}
   for (const [key, id] of Object.entries(config.assets)) {
-    if (typeof id === 'string' && selectThemeAsset.get(id)) assetUrls[key] = `/api/theme/assets/${encodeURIComponent(id)}`
+    if (typeof id === 'string' && await selectThemeAsset.get(id)) assetUrls[key] = `/api/theme/assets/${encodeURIComponent(id)}`
   }
   return { config, assetUrls }
 }
 
-function getPublicGameTheme() {
-  const settings = selectGameThemeSettings.get()
+async function getPublicGameTheme() {
+  const settings = await selectGameThemeSettings.get()
   const config = getThemeConfig(settings.published)
   const assetUrls = {}
   for (const [key, id] of Object.entries(config.assets)) {
-    if (typeof id === 'string' && selectThemeAsset.get(id)) assetUrls[key] = `/api/game-theme/assets/${encodeURIComponent(id)}`
+    if (typeof id === 'string' && await selectThemeAsset.get(id)) assetUrls[key] = `/api/game-theme/assets/${encodeURIComponent(id)}`
   }
   return { config, assetUrls }
 }
@@ -517,40 +284,40 @@ function setVotingSessionCookie(request, response, pollId, token) {
   response.setHeader('Set-Cookie', `${getVotingCookieName(pollId)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${votingSessionDurationSeconds}${secure}`)
 }
 
-function getCurrentUser(request) {
+async function getCurrentUser(request) {
   const token = getSessionToken(request)
   if (!token) return null
   const tokenHash = hashSessionToken(token)
-  const session = database.prepare(`
+  const session = await database.prepare(`
     SELECT users.id, users.username, users.role, sessions.expires_at AS expiresAt
     FROM sessions JOIN users ON users.id = sessions.user_id
     WHERE sessions.token_hash = ?
   `).get(tokenHash)
   if (!session) return null
   if (Date.parse(session.expiresAt) <= Date.now()) {
-    database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash)
+    await database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash)
     return null
   }
   return publicUser(session)
 }
 
-function setSessionCookie(request, response, userId) {
+async function setSessionCookie(request, response, userId) {
   const token = randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + sessionDurationSeconds * 1000).toISOString()
-  database.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(hashSessionToken(token), userId, expiresAt)
+  await database.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(hashSessionToken(token), userId, expiresAt)
   const secure = request.secure ? '; Secure' : ''
   response.setHeader('Set-Cookie', `vote_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${sessionDurationSeconds}${secure}`)
 }
 
-function requireUser(request, response, next) {
-  const user = getCurrentUser(request)
+async function requireUser(request, response, next) {
+  const user = await getCurrentUser(request)
   if (!user) return response.status(401).json({ error: 'Please log in to manage polls.' })
   request.user = user
   next()
 }
 
-function requireAdmin(request, response, next) {
-  const user = getCurrentUser(request)
+async function requireAdmin(request, response, next) {
+  const user = await getCurrentUser(request)
   if (!user) return response.status(401).json({ error: 'Please log in as an admin.' })
   if (user.role !== 'admin') return response.status(403).json({ error: 'Admin access is required.' })
   request.user = user
@@ -563,46 +330,42 @@ function validateCredentials(username, password) {
   return ''
 }
 
-function createUser(username, password, role) {
+async function createUser(username, password, role) {
   const salt = randomBytes(16)
   const passwordHash = scryptSync(password, salt, 64)
   const user = { id: randomUUID(), username, role, createdAt: new Date().toISOString() }
-  database.prepare('INSERT INTO users (id, username, password_hash, password_salt, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+  await database.prepare('INSERT INTO users (id, username, password_hash, password_salt, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
     .run(user.id, username, passwordHash, salt.toString('hex'), role, user.createdAt)
   return publicUser(user)
 }
 
-function migrateLegacyData() {
-  const insertPoll = database.prepare('INSERT OR IGNORE INTO polls (id, question, created_at) VALUES (?, ?, ?)')
-  const insertOption = database.prepare('INSERT OR IGNORE INTO poll_options (id, poll_id, label, position, votes) VALUES (?, ?, ?, ?, ?)')
-  const insertVoter = database.prepare('INSERT OR IGNORE INTO poll_voters (poll_id, voter_id, option_id, created_at) VALUES (?, ?, NULL, ?)')
+async function migrateLegacyData() {
+  if (!existsSync(legacyPollsFile)) return
+  const insertPoll = database.prepare('INSERT IGNORE INTO polls (id, question, created_at) VALUES (?, ?, ?)')
+  const insertOption = database.prepare('INSERT IGNORE INTO poll_options (id, poll_id, label, `position`, votes) VALUES (?, ?, ?, ?, ?)')
+  const insertVoter = database.prepare('INSERT IGNORE INTO poll_voters (poll_id, voter_id, option_id, created_at) VALUES (?, ?, NULL, ?)')
 
-  const migrate = () => inTransaction(() => {
-    if (existsSync(legacyPollsFile)) {
-      const legacyPolls = JSON.parse(readFileSync(legacyPollsFile, 'utf8'))
-      for (const poll of legacyPolls) {
-        insertPoll.run(poll.id, poll.question, poll.createdAt || new Date().toISOString())
-        poll.options.forEach((option, index) => insertOption.run(option.id, poll.id, option.label, index, option.votes || 0))
-        for (const voterId of poll.voterIds || []) {
-          insertVoter.run(poll.id, voterId, poll.createdAt || new Date().toISOString())
-        }
+  await inTransaction(async () => {
+    const legacyPolls = JSON.parse(readFileSync(legacyPollsFile, 'utf8'))
+    for (const poll of legacyPolls) {
+      await insertPoll.run(poll.id, poll.question, poll.createdAt || new Date().toISOString())
+      for (const [index, option] of poll.options.entries()) await insertOption.run(option.id, poll.id, option.label, index, option.votes || 0)
+      for (const voterId of poll.voterIds || []) {
+        await insertVoter.run(poll.id, voterId, poll.createdAt || new Date().toISOString())
       }
     }
-
   })
-
-  migrate()
 }
 
-migrateLegacyData()
+await migrateLegacyData()
 
-app.get('/api/auth/status', (request, response) => {
-  const userCount = database.prepare('SELECT count(*) AS count FROM users').get().count
-  response.json({ setupRequired: userCount === 0, user: getCurrentUser(request) })
+app.get('/api/auth/status', async (request, response) => {
+  const userCount = (await database.prepare('SELECT count(*) AS count FROM users').get()).count
+  response.json({ setupRequired: userCount === 0, user: await getCurrentUser(request) })
 })
 
-app.post('/api/auth/setup', (request, response) => {
-  const userCount = database.prepare('SELECT count(*) AS count FROM users').get().count
+app.post('/api/auth/setup', async (request, response) => {
+  const userCount = (await database.prepare('SELECT count(*) AS count FROM users').get()).count
   if (userCount !== 0) return response.status(409).json({ error: 'Initial setup has already been completed.' })
   const { username, password } = request.body || {}
   const validationError = validateCredentials(username, password)
@@ -610,34 +373,34 @@ app.post('/api/auth/setup', (request, response) => {
 
   let user
   try {
-    user = inTransaction(() => {
-      if (database.prepare('SELECT 1 FROM users LIMIT 1').get()) return null
+    user = await inTransaction(async () => {
+      if (await database.prepare('SELECT 1 FROM users LIMIT 1').get()) return null
       return createUser(username, password, 'admin')
     })
   } catch {
     return response.status(409).json({ error: 'Initial setup has already been completed.' })
   }
   if (!user) return response.status(409).json({ error: 'Initial setup has already been completed.' })
-  setSessionCookie(request, response, user.id)
+  await setSessionCookie(request, response, user.id)
   response.status(201).json({ user })
 })
 
-app.post('/api/auth/login', rateLimit({ windowMs: 60_000, max: 20, message: 'Too many login attempts. Try again in a minute.' }), (request, response) => {
+app.post('/api/auth/login', rateLimit({ windowMs: 60_000, max: 20, message: 'Too many login attempts. Try again in a minute.' }), async (request, response) => {
   const { username, password } = request.body || {}
   if (typeof username !== 'string' || typeof password !== 'string') {
     return response.status(400).json({ error: 'Enter your username and password.' })
   }
-  const user = database.prepare('SELECT id, username, role, password_hash AS passwordHash, password_salt AS passwordSalt FROM users WHERE username = ? COLLATE NOCASE').get(username)
+  const user = await database.prepare('SELECT id, username, role, password_hash AS passwordHash, password_salt AS passwordSalt FROM users WHERE username = ?').get(username)
   if (!user) return response.status(401).json({ error: 'Incorrect username or password.' })
   const passwordHash = scryptSync(password, Buffer.from(user.passwordSalt, 'hex'), 64)
   if (!timingSafeEqual(passwordHash, user.passwordHash)) return response.status(401).json({ error: 'Incorrect username or password.' })
-  setSessionCookie(request, response, user.id)
+  await setSessionCookie(request, response, user.id)
   response.json({ user: publicUser(user) })
 })
 
-app.post('/api/auth/logout', (request, response) => {
+app.post('/api/auth/logout', async (request, response) => {
   const token = getSessionToken(request)
-  if (token) database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashSessionToken(token))
+  if (token) await database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashSessionToken(token))
   response.setHeader('Set-Cookie', 'vote_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
   response.status(204).end()
 })
@@ -693,10 +456,10 @@ function isGameRoomExpired(room) {
   return Date.parse(room.updatedAt) <= Date.now() - 24 * 60 * 60 * 1000
 }
 
-app.get('/api/admin/games', requireAdmin, (_request, response) => {
+app.get('/api/admin/games', requireAdmin, async (_request, response) => {
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  database.prepare('DELETE FROM game_rooms WHERE updated_at <= ?').run(cutoff)
-  const rooms = database.prepare(`
+  await database.prepare('DELETE FROM game_rooms WHERE updated_at <= ?').run(cutoff)
+  const rooms = await database.prepare(`
     SELECT id, room_name AS roomName, status, player_x_name AS playerXName, player_o_name AS playerOName,
       updated_at AS updatedAt
     FROM game_rooms
@@ -706,13 +469,13 @@ app.get('/api/admin/games', requireAdmin, (_request, response) => {
   response.json({ rooms, limit: 3 })
 })
 
-app.delete('/api/admin/games/:id', requireAdmin, (request, response) => {
-  const result = database.prepare("DELETE FROM game_rooms WHERE id = ? AND status IN ('waiting', 'playing')").run(request.params.id)
+app.delete('/api/admin/games/:id', requireAdmin, async (request, response) => {
+  const result = await database.prepare("DELETE FROM game_rooms WHERE id = ? AND status IN ('waiting', 'playing')").run(request.params.id)
   if (result.changes === 0) return response.status(404).json({ error: 'The active game room could not be found.' })
   response.status(204).end()
 })
 
-app.post('/api/games', requireAdmin, imageUpload.fields([{ name: 'xImage', maxCount: 1 }, { name: 'oImage', maxCount: 1 }]), (request, response) => {
+app.post('/api/games', requireAdmin, imageUpload.fields([{ name: 'xImage', maxCount: 1 }, { name: 'oImage', maxCount: 1 }]), async (request, response) => {
   const roomName = typeof request.body?.roomName === 'string' ? request.body.roomName.trim() : ''
   if (!roomName || roomName.length > 60) {
     return response.status(400).json({ error: 'Enter a game room name up to 60 characters.' })
@@ -732,12 +495,12 @@ app.post('/api/games', requireAdmin, imageUpload.fields([{ name: 'xImage', maxCo
   const activeRoomLimit = 3
   const id = randomUUID()
   const now = new Date().toISOString()
-  const created = inTransaction(() => {
-    database.prepare('DELETE FROM game_rooms WHERE updated_at <= ?')
+  const created = await inTransaction(async () => {
+    await database.prepare('DELETE FROM game_rooms WHERE updated_at <= ?')
       .run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-    const activeCount = database.prepare("SELECT count(*) AS count FROM game_rooms WHERE status IN ('waiting', 'playing')").get().count
+    const activeCount = (await database.prepare("SELECT count(*) AS count FROM game_rooms WHERE status IN ('waiting', 'playing')").get()).count
     if (activeCount >= activeRoomLimit) return false
-    database.prepare(`
+    await database.prepare(`
       INSERT INTO game_rooms
         (id, room_name, player_x_token_hash, player_x_name, status, board_json, history_x_json, history_o_json,
           next_player, x_image_mime_type, x_image, o_image_mime_type, o_image, updated_at)
@@ -758,39 +521,39 @@ app.post('/api/games', requireAdmin, imageUpload.fields([{ name: 'xImage', maxCo
   response.status(201).json({ id })
 })
 
-app.get('/api/games/:id/pieces/:player', (request, response) => {
+app.get('/api/games/:id/pieces/:player', async (request, response) => {
   const player = request.params.player.toUpperCase()
   if (!['X', 'O'].includes(player)) return response.status(404).end()
   const column = player === 'X' ? 'x_image' : 'o_image'
   const mimeColumn = player === 'X' ? 'x_image_mime_type' : 'o_image_mime_type'
-  const piece = database.prepare(`SELECT ${column} AS image, ${mimeColumn} AS mimeType FROM game_rooms WHERE id = ?`).get(request.params.id)
+  const piece = await database.prepare(`SELECT ${column} AS image, ${mimeColumn} AS mimeType FROM game_rooms WHERE id = ?`).get(request.params.id)
   if (!piece?.image || !piece.mimeType) return response.status(404).end()
   response.type(piece.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(piece.image))
 })
 
-app.post('/api/games/:id/join', (request, response) => {
+app.post('/api/games/:id/join', async (request, response) => {
   const { name } = request.body || {}
   if (!validPlayerName(name)) return response.status(400).json({ error: 'Enter a player name up to 24 characters.' })
-  const room = getGameRoom(request.params.id)
+  const room = await getGameRoom(request.params.id)
   if (!room || isGameRoomExpired(room)) {
-    if (room) database.prepare('DELETE FROM game_rooms WHERE id = ?').run(room.id)
+    if (room) await database.prepare('DELETE FROM game_rooms WHERE id = ?').run(room.id)
     return response.status(404).json({ error: 'This game room has expired or does not exist.' })
   }
   const token = randomBytes(32).toString('base64url')
-  const player = inTransaction(() => {
-    const current = getGameRoom(room.id)
+  const player = await inTransaction(async () => {
+    const current = await getGameRoom(room.id)
     if (!current || current.status !== 'waiting') return null
     const side = current.playerXTokenHash === '' ? 'X' : current.playerOTokenHash ? null : 'O'
     if (!side) return null
     const now = new Date().toISOString()
     if (side === 'X') {
-      database.prepare(`
+      await database.prepare(`
         UPDATE game_rooms
         SET player_x_token_hash = ?, player_x_name = ?, revision = revision + 1, updated_at = ?
         WHERE id = ? AND status = 'waiting' AND player_x_token_hash = ''
       `).run(hashSessionToken(token), name.trim(), now, room.id)
     } else {
-      database.prepare(`
+      await database.prepare(`
         UPDATE game_rooms
         SET player_o_token_hash = ?, player_o_name = ?, status = 'playing', revision = revision + 1, updated_at = ?
         WHERE id = ? AND status = 'waiting' AND player_o_token_hash IS NULL
@@ -799,28 +562,28 @@ app.post('/api/games/:id/join', (request, response) => {
     return side
   })
   if (!player) return response.status(409).json({ error: 'Both player slots are already filled.' })
-  response.status(200).json({ token, game: gameRoomState(getGameRoom(room.id), player) })
+  response.status(200).json({ token, game: gameRoomState(await getGameRoom(room.id), player) })
 })
 
-app.get('/api/games/:id', (request, response) => {
-  const room = getGameRoom(request.params.id)
+app.get('/api/games/:id', async (request, response) => {
+  const room = await getGameRoom(request.params.id)
   if (!room || isGameRoomExpired(room)) {
-    if (room) database.prepare('DELETE FROM game_rooms WHERE id = ?').run(room.id)
+    if (room) await database.prepare('DELETE FROM game_rooms WHERE id = ?').run(room.id)
     return response.status(404).json({ error: 'This game room has expired or does not exist.' })
   }
   const player = getGamePlayer(request, room)
   if (!player) {
-    const user = getCurrentUser(request)
+    const user = await getCurrentUser(request)
     if (!user || user.role !== 'admin') return response.status(403).json({ error: 'A valid player session or admin account is required to view this game.' })
     return response.json(gameRoomState(room, null))
   }
   response.json(gameRoomState(room, player))
 })
 
-app.post('/api/games/:id/moves', (request, response) => {
-  const room = getGameRoom(request.params.id)
+app.post('/api/games/:id/moves', async (request, response) => {
+  const room = await getGameRoom(request.params.id)
   if (!room || isGameRoomExpired(room)) {
-    if (room) database.prepare('DELETE FROM game_rooms WHERE id = ?').run(room.id)
+    if (room) await database.prepare('DELETE FROM game_rooms WHERE id = ?').run(room.id)
     return response.status(404).json({ error: 'This game room has expired or does not exist.' })
   }
   const player = getGamePlayer(request, room)
@@ -828,8 +591,8 @@ app.post('/api/games/:id/moves', (request, response) => {
   const { cell } = request.body || {}
   if (!Number.isInteger(cell) || cell < 0 || cell > 8) return response.status(400).json({ error: 'Choose a square on the board.' })
 
-  const result = inTransaction(() => {
-    const current = getGameRoom(room.id)
+  const result = await inTransaction(async () => {
+    const current = await getGameRoom(room.id)
     if (!current || current.status !== 'playing') return { error: 'This game is not accepting moves.', status: 409 }
     if (current.nextPlayer !== player) return { error: 'Wait for your turn.', status: 409 }
     const board = JSON.parse(current.boardJson)
@@ -841,7 +604,7 @@ app.post('/api/games/:id/moves', (request, response) => {
     const winner = lines.some((line) => line.every((index) => board[index] === player)) ? player : null
     if (!winner && history.length > 3) board[history.shift()] = null
     const now = new Date().toISOString()
-    database.prepare(`
+    await database.prepare(`
       UPDATE game_rooms SET board_json = ?, history_${player === 'X' ? 'x' : 'o'}_json = ?,
         next_player = ?, winner = ?, status = ?, rematch_deadline = ?, rematch_x_vote = NULL,
         rematch_o_vote = NULL, revision = revision + 1, updated_at = ? WHERE id = ?
@@ -855,16 +618,16 @@ app.post('/api/games/:id/moves', (request, response) => {
       now,
       room.id,
     )
-    return { game: gameRoomState(getGameRoom(room.id), player) }
+    return { game: gameRoomState(await getGameRoom(room.id), player) }
   })
   if (result.error) return response.status(result.status).json({ error: result.error })
   response.json(result.game)
 })
 
-app.post('/api/games/:id/rematch', (request, response) => {
-  const room = getGameRoom(request.params.id)
+app.post('/api/games/:id/rematch', async (request, response) => {
+  const room = await getGameRoom(request.params.id)
   if (!room || isGameRoomExpired(room)) {
-    if (room) database.prepare('DELETE FROM game_rooms WHERE id = ?').run(room.id)
+    if (room) await database.prepare('DELETE FROM game_rooms WHERE id = ?').run(room.id)
     return response.status(404).json({ error: 'This game room has expired or does not exist.' })
   }
   const player = getGamePlayer(request, room)
@@ -872,8 +635,8 @@ app.post('/api/games/:id/rematch', (request, response) => {
   const { playAgain } = request.body || {}
   if (typeof playAgain !== 'boolean') return response.status(400).json({ error: 'Choose whether you want to play again.' })
 
-  const result = inTransaction(() => {
-    const current = getGameRoom(room.id)
+  const result = await inTransaction(async () => {
+    const current = await getGameRoom(room.id)
     if (!current || current.status !== 'finished') return { error: 'This game is not ready for a rematch.', status: 409 }
     if (!current.rematchDeadline || Date.parse(current.rematchDeadline) <= Date.now()) {
       return { error: 'The rematch time has expired.', status: 409 }
@@ -889,18 +652,18 @@ app.post('/api/games/:id/rematch', (request, response) => {
       return { game: gameRoomState(current, player) }
     }
 
-    database.prepare(`UPDATE game_rooms SET ${voteColumn} = ?, revision = revision + 1, updated_at = ? WHERE id = ?`)
+    await database.prepare(`UPDATE game_rooms SET ${voteColumn} = ?, revision = revision + 1, updated_at = ? WHERE id = ?`)
       .run(Number(playAgain), new Date().toISOString(), room.id)
-    const updated = getGameRoom(room.id)
+    const updated = await getGameRoom(room.id)
     if (updated.rematchXVote === 1 && updated.rematchOVote === 1) {
       const now = new Date().toISOString()
-      database.prepare(`
+      await database.prepare(`
         UPDATE game_rooms SET board_json = ?, history_x_json = '[]', history_o_json = '[]',
           next_player = 'X', winner = NULL, status = 'playing', rematch_deadline = NULL,
           rematch_x_vote = NULL, rematch_o_vote = NULL, revision = revision + 1,
           updated_at = ? WHERE id = ?
       `).run(JSON.stringify(Array(9).fill(null)), now, room.id)
-      return { game: gameRoomState(getGameRoom(room.id), player) }
+      return { game: gameRoomState(await getGameRoom(room.id), player) }
     }
     return { game: gameRoomState(updated, player) }
   })
@@ -909,51 +672,51 @@ app.post('/api/games/:id/rematch', (request, response) => {
   response.json(result.game)
 })
 
-app.get('/api/admin/users', requireAdmin, (_request, response) => {
-  const users = database.prepare('SELECT id, username, role, created_at AS createdAt FROM users ORDER BY created_at').all()
+app.get('/api/admin/users', requireAdmin, async (_request, response) => {
+  const users = await database.prepare('SELECT id, username, role, created_at AS createdAt FROM users ORDER BY created_at').all()
   response.json(users)
 })
 
-app.post('/api/admin/users', requireAdmin, (request, response) => {
+app.post('/api/admin/users', requireAdmin, async (request, response) => {
   const { username, password, role } = request.body || {}
   const validationError = validateCredentials(username, password)
   if (validationError) return response.status(400).json({ error: validationError })
   if (!['admin', 'host'].includes(role)) return response.status(400).json({ error: 'Choose an admin or host role.' })
 
   try {
-    const user = createUser(username, password, role)
+    const user = await createUser(username, password, role)
     response.status(201).json({ user })
   } catch {
     response.status(409).json({ error: 'That username is already in use.' })
   }
 })
 
-app.get('/api/theme', (_request, response) => response.json(getPublicTheme()))
+app.get('/api/theme', async (_request, response) => response.json(await getPublicTheme()))
 
-app.get('/api/game-theme', (_request, response) => response.json(getPublicGameTheme()))
+app.get('/api/game-theme', async (_request, response) => response.json(await getPublicGameTheme()))
 
-app.get('/api/game-theme/assets/:id', (request, response) => {
-  const theme = getPublicGameTheme()
+app.get('/api/game-theme/assets/:id', async (request, response) => {
+  const theme = await getPublicGameTheme()
   if (!Object.values(theme.config.assets).includes(request.params.id)) return response.status(404).end()
-  const asset = selectThemeAsset.get(request.params.id)
+  const asset = await selectThemeAsset.get(request.params.id)
   if (!asset) return response.status(404).end()
-  const file = database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
+  const file = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
   response.type(asset.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'public, max-age=3600, immutable').sendFile(path.join(themeAssetsDirectory, file.fileName))
 })
 
-app.get('/api/admin/game-theme', requireAdmin, (_request, response) => {
-  const settings = selectGameThemeSettings.get()
+app.get('/api/admin/game-theme', requireAdmin, async (_request, response) => {
+  const settings = await selectGameThemeSettings.get()
   response.json({
     draft: getThemeConfig(settings.draft),
     published: getThemeConfig(settings.published),
-    draftAssets: selectThemeAssets.all(),
+    draftAssets: await selectThemeAssets.all(),
     maxUploadBytes: themeImageMaxBytes,
     updatedAt: settings.updatedAt,
     publishedAt: settings.publishedAt,
   })
 })
 
-app.put('/api/admin/game-theme/draft', requireAdmin, (request, response) => {
+app.put('/api/admin/game-theme/draft', requireAdmin, async (request, response) => {
   const config = request.body
   const assetKeys = Object.keys(defaultGameTheme.assets)
   const colorKeys = Object.keys(defaultGameTheme.colors)
@@ -961,7 +724,7 @@ app.put('/api/admin/game-theme/draft', requireAdmin, (request, response) => {
   if (!config || typeof config !== 'object' || Array.isArray(config) || typeof config.eventTitle !== 'string' || config.eventTitle.trim().length < 1 || config.eventTitle.trim().length > 80) {
     return response.status(400).json({ error: 'Enter a game title between 1 and 80 characters.' })
   }
-  if (!config.assets || assetKeys.some((key) => config.assets[key] !== null && (typeof config.assets[key] !== 'string' || !/^[0-9a-f-]{36}$/i.test(config.assets[key]) || !selectThemeAsset.get(config.assets[key])))) {
+  if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys))) {
     return response.status(400).json({ error: 'Choose valid uploaded images for the game theme.' })
   }
   if (!config.colors || colorKeys.some((key) => typeof config.colors[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(config.colors[key]))) {
@@ -986,50 +749,50 @@ app.put('/api/admin/game-theme/draft', requireAdmin, (request, response) => {
     },
   }
   const updatedAt = new Date().toISOString()
-  database.prepare('UPDATE game_theme_settings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = 1')
+  await database.prepare('UPDATE game_theme_settings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = 1')
     .run(JSON.stringify(normalized), request.user.id, updatedAt)
-  auditGameThemeChange(request.user, 'draft.save', { eventTitle: normalized.eventTitle })
+  await auditGameThemeChange(request.user, 'draft.save', { eventTitle: normalized.eventTitle })
   response.json({ draft: normalized, updatedAt })
 })
 
-app.post('/api/admin/game-theme/publish', requireAdmin, (request, response) => {
-  const settings = selectGameThemeSettings.get()
+app.post('/api/admin/game-theme/publish', requireAdmin, async (request, response) => {
+  const settings = await selectGameThemeSettings.get()
   const publishedAt = new Date().toISOString()
-  database.prepare('UPDATE game_theme_settings SET published_json = draft_json, published_by = ?, published_at = ? WHERE id = 1')
+  await database.prepare('UPDATE game_theme_settings SET published_json = draft_json, published_by = ?, published_at = ? WHERE id = 1')
     .run(request.user.id, publishedAt)
-  auditGameThemeChange(request.user, 'theme.publish', { eventTitle: getThemeConfig(settings.draft).eventTitle })
+  await auditGameThemeChange(request.user, 'theme.publish', { eventTitle: getThemeConfig(settings.draft).eventTitle })
   response.json({ published: getThemeConfig(settings.draft), publishedAt })
 })
 
-app.post('/api/admin/game-theme/reset', requireAdmin, (request, response) => {
+app.post('/api/admin/game-theme/reset', requireAdmin, async (request, response) => {
   const now = new Date().toISOString()
-  database.prepare('UPDATE game_theme_settings SET draft_json = ?, published_json = ?, updated_by = ?, updated_at = ?, published_by = ?, published_at = ? WHERE id = 1')
+  await database.prepare('UPDATE game_theme_settings SET draft_json = ?, published_json = ?, updated_by = ?, updated_at = ?, published_by = ?, published_at = ? WHERE id = 1')
     .run(JSON.stringify(defaultGameTheme), JSON.stringify(defaultGameTheme), request.user.id, now, request.user.id, now)
-  auditGameThemeChange(request.user, 'theme.reset')
+  await auditGameThemeChange(request.user, 'theme.reset')
   response.json({ theme: defaultGameTheme, resetAt: now })
 })
 
-app.get('/api/admin/game-theme/audit', requireAdmin, (_request, response) => {
-  const entries = database.prepare("SELECT administrator_name AS administrator, action, details, created_at AS createdAt FROM theme_audit_logs WHERE action LIKE 'game-theme.%' ORDER BY created_at DESC LIMIT 100").all()
+app.get('/api/admin/game-theme/audit', requireAdmin, async (_request, response) => {
+  const entries = await database.prepare("SELECT administrator_name AS administrator, action, details, created_at AS createdAt FROM theme_audit_logs WHERE action LIKE 'game-theme.%' ORDER BY created_at DESC LIMIT 100").all()
   response.json(entries.map((entry) => ({ ...entry, details: JSON.parse(entry.details) })))
 })
 
-app.get('/api/theme/assets/:id', (request, response) => {
-  const theme = getPublicTheme()
+app.get('/api/theme/assets/:id', async (request, response) => {
+  const theme = await getPublicTheme()
   if (!Object.values(theme.config.assets).includes(request.params.id)) return response.status(404).end()
-  const asset = selectThemeAsset.get(request.params.id)
+  const asset = await selectThemeAsset.get(request.params.id)
   if (!asset) return response.status(404).end()
-  const file = database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
+  const file = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
   response.type(asset.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'public, max-age=3600, immutable').sendFile(path.join(themeAssetsDirectory, file.fileName))
 })
 
-app.get('/api/admin/theme', requireAdmin, (_request, response) => {
-  const settings = selectThemeSettings.get()
+app.get('/api/admin/theme', requireAdmin, async (_request, response) => {
+  const settings = await selectThemeSettings.get()
   const draft = getThemeConfig(settings.draft)
   response.json({
     draft,
     published: getThemeConfig(settings.published),
-    draftAssets: selectThemeAssets.all(),
+    draftAssets: await selectThemeAssets.all(),
     maxUploadBytes: themeImageMaxBytes,
     updatedAt: settings.updatedAt,
     publishedAt: settings.publishedAt,
@@ -1046,7 +809,7 @@ function limitThemeUploads(request, response, next) {
   next()
 }
 
-app.post('/api/admin/theme/assets', requireAdmin, limitThemeUploads, themeImageUpload.single('image'), (request, response) => {
+app.post('/api/admin/theme/assets', requireAdmin, limitThemeUploads, themeImageUpload.single('image'), async (request, response) => {
   const { file } = request
   if (!file) return response.status(400).json({ error: 'Choose an image to upload.' })
 
@@ -1067,25 +830,25 @@ app.post('/api/admin/theme/assets', requireAdmin, limitThemeUploads, themeImageU
   const uploadedAt = new Date().toISOString()
   try {
     writeFileSync(path.join(themeAssetsDirectory, fileName), file.buffer, { flag: 'wx' })
-    database.prepare('INSERT INTO theme_assets (id, file_name, mime_type, size_bytes, width, height, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    await database.prepare('INSERT INTO theme_assets (id, file_name, mime_type, size_bytes, width, height, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, fileName, mimeType, file.size, dimensions.width, dimensions.height, request.user.id, uploadedAt)
   } catch (error) {
     const filePath = path.join(themeAssetsDirectory, fileName)
     if (existsSync(filePath)) unlinkSync(filePath)
     throw error
   }
-  auditThemeChange(request.user, 'asset.upload', { assetId: id, mimeType, sizeBytes: file.size, width: dimensions.width, height: dimensions.height })
+  await auditThemeChange(request.user, 'asset.upload', { assetId: id, mimeType, sizeBytes: file.size, width: dimensions.width, height: dimensions.height })
   response.status(201).json({ asset: { id, mimeType, sizeBytes: file.size, width: dimensions.width, height: dimensions.height, uploadedAt, url: `/api/admin/theme/assets/${encodeURIComponent(id)}` } })
 })
 
-app.get('/api/admin/theme/assets/:id', requireAdmin, (request, response) => {
-  const asset = selectThemeAsset.get(request.params.id)
+app.get('/api/admin/theme/assets/:id', requireAdmin, async (request, response) => {
+  const asset = await selectThemeAsset.get(request.params.id)
   if (!asset) return response.status(404).json({ error: 'Theme image not found.' })
-  const file = database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
+  const file = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
   response.type(asset.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'private, max-age=3600, immutable').sendFile(path.join(themeAssetsDirectory, file.fileName))
 })
 
-app.put('/api/admin/theme/draft', requireAdmin, (request, response) => {
+app.put('/api/admin/theme/draft', requireAdmin, async (request, response) => {
   const config = request.body
   const assetKeys = Object.keys(defaultTheme.assets)
   const colorKeys = Object.keys(defaultTheme.colors)
@@ -1093,7 +856,7 @@ app.put('/api/admin/theme/draft', requireAdmin, (request, response) => {
   if (!config || typeof config !== 'object' || Array.isArray(config) || typeof config.eventTitle !== 'string' || config.eventTitle.trim().length < 1 || config.eventTitle.trim().length > 80) {
     return response.status(400).json({ error: 'Enter an event title between 1 and 80 characters.' })
   }
-  if (!config.assets || assetKeys.some((key) => config.assets[key] !== null && (typeof config.assets[key] !== 'string' || !/^[0-9a-f-]{36}$/i.test(config.assets[key]) || !selectThemeAsset.get(config.assets[key])))) {
+  if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys))) {
     return response.status(400).json({ error: 'Choose valid uploaded images for the theme.' })
   }
   if (!config.colors || colorKeys.some((key) => typeof config.colors[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(config.colors[key]))) {
@@ -1119,42 +882,42 @@ app.put('/api/admin/theme/draft', requireAdmin, (request, response) => {
     },
   }
   const updatedAt = new Date().toISOString()
-  database.prepare('UPDATE theme_settings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = 1')
+  await database.prepare('UPDATE theme_settings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = 1')
     .run(JSON.stringify(normalized), request.user.id, updatedAt)
-  auditThemeChange(request.user, 'draft.save', { eventTitle: normalized.eventTitle })
+  await auditThemeChange(request.user, 'draft.save', { eventTitle: normalized.eventTitle })
   response.json({ draft: normalized, updatedAt })
 })
 
-app.post('/api/admin/theme/publish', requireAdmin, (_request, response) => {
-  const settings = selectThemeSettings.get()
+app.post('/api/admin/theme/publish', requireAdmin, async (_request, response) => {
+  const settings = await selectThemeSettings.get()
   const publishedAt = new Date().toISOString()
-  database.prepare('UPDATE theme_settings SET published_json = draft_json, published_by = ?, published_at = ? WHERE id = 1')
+  await database.prepare('UPDATE theme_settings SET published_json = draft_json, published_by = ?, published_at = ? WHERE id = 1')
     .run(_request.user.id, publishedAt)
-  auditThemeChange(_request.user, 'theme.publish', { eventTitle: getThemeConfig(settings.draft).eventTitle })
+  await auditThemeChange(_request.user, 'theme.publish', { eventTitle: getThemeConfig(settings.draft).eventTitle })
   response.json({ published: getThemeConfig(settings.draft), publishedAt })
 })
 
-app.post('/api/admin/theme/reset', requireAdmin, (_request, response) => {
+app.post('/api/admin/theme/reset', requireAdmin, async (_request, response) => {
   const now = new Date().toISOString()
-  database.prepare('UPDATE theme_settings SET draft_json = ?, published_json = ?, updated_by = ?, updated_at = ?, published_by = ?, published_at = ? WHERE id = 1')
+  await database.prepare('UPDATE theme_settings SET draft_json = ?, published_json = ?, updated_by = ?, updated_at = ?, published_by = ?, published_at = ? WHERE id = 1')
     .run(JSON.stringify(defaultTheme), JSON.stringify(defaultTheme), _request.user.id, now, _request.user.id, now)
-  auditThemeChange(_request.user, 'theme.reset')
-  for (const asset of selectThemeAssets.all()) removeUnusedThemeAsset(asset.id)
+  await auditThemeChange(_request.user, 'theme.reset')
+  for (const asset of await selectThemeAssets.all()) await removeUnusedThemeAsset(asset.id)
   response.json({ theme: defaultTheme, resetAt: now })
 })
 
-app.delete('/api/admin/theme/assets/:id', requireAdmin, (request, response) => {
-  if (getReferencedThemeAssetIds().has(request.params.id)) {
+app.delete('/api/admin/theme/assets/:id', requireAdmin, async (request, response) => {
+  if ((await getReferencedThemeAssetIds()).has(request.params.id)) {
     return response.status(409).json({ error: 'Remove this image from both the draft and published themes before deleting it.' })
   }
-  const deleted = removeUnusedThemeAsset(request.params.id)
+  const deleted = await removeUnusedThemeAsset(request.params.id)
   if (!deleted) return response.status(404).json({ error: 'Theme image not found.' })
-  auditThemeChange(request.user, 'asset.delete', { assetId: request.params.id })
+  await auditThemeChange(request.user, 'asset.delete', { assetId: request.params.id })
   response.status(204).end()
 })
 
-app.get('/api/admin/theme/audit', requireAdmin, (_request, response) => {
-  const entries = database.prepare('SELECT administrator_name AS administrator, action, details, created_at AS createdAt FROM theme_audit_logs ORDER BY created_at DESC LIMIT 100').all()
+app.get('/api/admin/theme/audit', requireAdmin, async (_request, response) => {
+  const entries = await database.prepare('SELECT administrator_name AS administrator, action, details, created_at AS createdAt FROM theme_audit_logs ORDER BY created_at DESC LIMIT 100').all()
   response.json(entries.map((entry) => ({ ...entry, details: JSON.parse(entry.details) })))
 })
 
@@ -1166,23 +929,23 @@ function getSelfieSessionForOwner(sessionId, userId) {
   `).get(sessionId, userId)
 }
 
-app.post('/api/selfie/sessions', requireUser, (request, response) => {
+app.post('/api/selfie/sessions', requireUser, async (request, response) => {
   const now = new Date()
-  database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(now.toISOString())
+  await database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(now.toISOString())
   const sessionId = randomUUID()
   const joinToken = randomBytes(32).toString('base64url')
   const expiresAt = new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString()
-  database.prepare(`
+  await database.prepare(`
     INSERT INTO selfie_sessions (id, join_token_hash, owner_user_id, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?)
   `).run(sessionId, hashSessionToken(joinToken), request.user.id, now.toISOString(), expiresAt)
   response.status(201).json({ id: sessionId, joinToken, expiresAt })
 })
 
-app.post('/api/selfie/join/:token', imageUpload.single('image'), (request, response) => {
+app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request, response) => {
   const token = request.params.token
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).json({ error: 'This selfie session is invalid or has expired.' })
-  const session = database.prepare(`
+  const session = await database.prepare(`
     SELECT id, expires_at AS expiresAt, closed_at AS closedAt
     FROM selfie_sessions
     WHERE join_token_hash = ?
@@ -1200,14 +963,14 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), (request, respo
     return response.status(400).json({ error: 'Photo dimensions must be valid and no larger than 12,000 pixels per side or 40 megapixels.' })
   }
   const id = randomUUID()
-  const submitted = inTransaction(() => {
-    const currentSession = database.prepare(`
+  const submitted = await inTransaction(async () => {
+    const currentSession = await database.prepare(`
       SELECT id, expires_at AS expiresAt, closed_at AS closedAt FROM selfie_sessions WHERE id = ?
     `).get(session.id)
     if (!currentSession || currentSession.closedAt || Date.parse(currentSession.expiresAt) <= Date.now()) return 'closed'
-    const submissionCount = database.prepare('SELECT count(*) AS count FROM selfie_submissions WHERE session_id = ?').get(session.id).count
+    const submissionCount = (await database.prepare('SELECT count(*) AS count FROM selfie_submissions WHERE session_id = ?').get(session.id)).count
     if (submissionCount >= 100) return 'limit'
-    database.prepare(`
+    await database.prepare(`
       INSERT INTO selfie_submissions (id, session_id, image_mime_type, image, file_name, status, created_at)
       VALUES (?, ?, ?, ?, ?, 'pending', ?)
     `).run(id, session.id, file.mimetype, file.buffer, file.originalname.slice(0, 120), new Date().toISOString())
@@ -1218,22 +981,22 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), (request, respo
   response.status(201).json({ id, status: 'pending' })
 })
 
-app.get('/api/selfie/sessions/:id/submissions', requireUser, (request, response) => {
-  const session = getSelfieSessionForOwner(request.params.id, request.user.id)
+app.get('/api/selfie/sessions/:id/submissions', requireUser, async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
   if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
-  const submissions = database.prepare(`
+  const submissions = await database.prepare(`
     SELECT id, file_name AS fileName, status, created_at AS createdAt
     FROM selfie_submissions WHERE session_id = ? ORDER BY created_at DESC
   `).all(session.id)
   response.json({ submissions, expiresAt: session.expiresAt, closed: Boolean(session.closedAt) || Date.parse(session.expiresAt) <= Date.now() })
 })
 
-app.post('/api/selfie/sessions/:sessionId/submissions/:submissionId/approve', requireUser, (request, response) => {
-  const session = getSelfieSessionForOwner(request.params.sessionId, request.user.id)
+app.post('/api/selfie/sessions/:sessionId/submissions/:submissionId/approve', requireUser, async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.sessionId, request.user.id)
   if (!session || session.closedAt || Date.parse(session.expiresAt) <= Date.now()) {
     return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
   }
-  const result = database.prepare(`
+  const result = await database.prepare(`
     UPDATE selfie_submissions SET status = 'approved'
     WHERE id = ? AND session_id = ? AND status = 'pending'
   `).run(request.params.submissionId, session.id)
@@ -1241,68 +1004,68 @@ app.post('/api/selfie/sessions/:sessionId/submissions/:submissionId/approve', re
   response.status(204).end()
 })
 
-app.delete('/api/selfie/sessions/:sessionId/submissions/:submissionId', requireUser, (request, response) => {
-  const session = getSelfieSessionForOwner(request.params.sessionId, request.user.id)
+app.delete('/api/selfie/sessions/:sessionId/submissions/:submissionId', requireUser, async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.sessionId, request.user.id)
   if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
-  const result = database.prepare('DELETE FROM selfie_submissions WHERE id = ? AND session_id = ?')
+  const result = await database.prepare('DELETE FROM selfie_submissions WHERE id = ? AND session_id = ?')
     .run(request.params.submissionId, session.id)
   if (result.changes === 0) return response.status(404).json({ error: 'This photo could not be found.' })
   response.status(204).end()
 })
 
-app.get('/api/selfie/sessions/:sessionId/submissions/:submissionId/image', requireUser, (request, response) => {
-  const image = database.prepare(`
-    SELECT submission.image, submission.image_mime_type AS mimeType
-    FROM selfie_submissions submission
-    JOIN selfie_sessions session ON session.id = submission.session_id
-    WHERE submission.id = ? AND submission.session_id = ? AND session.owner_user_id = ?
+app.get('/api/selfie/sessions/:sessionId/submissions/:submissionId/image', requireUser, async (request, response) => {
+  const image = await database.prepare(`
+    SELECT sub.image, sub.image_mime_type AS mimeType
+    FROM selfie_submissions sub
+    JOIN selfie_sessions sess ON sess.id = sub.session_id
+    WHERE sub.id = ? AND sub.session_id = ? AND sess.owner_user_id = ?
   `).get(request.params.submissionId, request.params.sessionId, request.user.id)
   if (!image) return response.status(404).end()
   response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(image.image))
 })
 
-app.post('/api/selfie/sessions/:id/close', requireUser, (request, response) => {
-  const session = getSelfieSessionForOwner(request.params.id, request.user.id)
+app.post('/api/selfie/sessions/:id/close', requireUser, async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
   if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
-  database.prepare('DELETE FROM selfie_sessions WHERE id = ?').run(session.id)
+  await database.prepare('DELETE FROM selfie_sessions WHERE id = ?').run(session.id)
   response.status(204).end()
 })
 
-app.get('/api/polls', requireUser, (_request, response) => response.json(listPolls()))
+app.get('/api/polls', requireUser, async (_request, response) => response.json(await listPolls()))
 
-app.get('/api/polls/:id', (request, response) => {
-  const poll = getPoll(request.params.id, { admin: Boolean(getCurrentUser(request)) })
+app.get('/api/polls/:id', async (request, response) => {
+  const poll = await getPoll(request.params.id, { admin: Boolean(await getCurrentUser(request)) })
   if (!poll) return response.status(404).json({ error: 'This poll could not be found.' })
   response.set('Cache-Control', 'no-store').json(poll)
 })
 
-app.get('/api/polls/:id/question-image', (request, response) => {
-  const image = database.prepare('SELECT question_image_mime_type AS mimeType, question_image AS image FROM polls WHERE id = ?').get(request.params.id)
+app.get('/api/polls/:id/question-image', async (request, response) => {
+  const image = await database.prepare('SELECT question_image_mime_type AS mimeType, question_image AS image FROM polls WHERE id = ?').get(request.params.id)
   if (!image?.image) return response.status(404).end()
   response.type(image.mimeType).set('Cache-Control', 'private, max-age=300').send(Buffer.from(image.image))
 })
 
-app.get('/api/polls/:id/logo', (request, response) => {
-  const logo = database.prepare('SELECT logo_mime_type AS mimeType, logo FROM polls WHERE id = ?').get(request.params.id)
+app.get('/api/polls/:id/logo', async (request, response) => {
+  const logo = await database.prepare('SELECT logo_mime_type AS mimeType, logo FROM polls WHERE id = ?').get(request.params.id)
   if (!logo?.logo) return response.status(404).end()
   response.type(logo.mimeType).set('Cache-Control', 'private, max-age=300').send(Buffer.from(logo.logo))
 })
 
-app.get('/api/poll-options/:id/image', (request, response) => {
-  const image = database.prepare('SELECT image_mime_type AS mimeType, image FROM poll_options WHERE id = ?').get(request.params.id)
+app.get('/api/poll-options/:id/image', async (request, response) => {
+  const image = await database.prepare('SELECT image_mime_type AS mimeType, image FROM poll_options WHERE id = ?').get(request.params.id)
   if (!image?.image) return response.status(404).end()
   response.type(image.mimeType).set('Cache-Control', 'private, max-age=300').send(Buffer.from(image.image))
 })
 
-app.post('/api/polls/:id/session', rateLimit({ windowMs: 60_000, max: Number(process.env.QA_RATE_LIMIT_PER_MINUTE || 3000) }), (request, response) => {
+app.post('/api/polls/:id/session', rateLimit({ windowMs: 60_000, max: Number(process.env.QA_RATE_LIMIT_PER_MINUTE || 3000) }), async (request, response) => {
   const pollId = request.params.id
-  const sessionPoll = selectPoll.get(pollId)
+  const sessionPoll = await selectPoll.get(pollId)
   if (!sessionPoll) return response.status(404).json({ error: 'This poll could not be found.' })
 
   const now = new Date()
   const token = getCookie(request, getVotingCookieName(pollId))
   if (/^[A-Za-z0-9_-]{43}$/.test(token)) {
-    const existingSession = database.prepare(`
+    const existingSession = await database.prepare(`
       SELECT id, expires_at AS expiresAt, consumed_at AS consumedAt
       FROM poll_voting_sessions
       WHERE token_hash = ? AND poll_id = ?
@@ -1313,22 +1076,22 @@ app.post('/api/polls/:id/session', rateLimit({ windowMs: 60_000, max: Number(pro
         authenticated: true,
         voted: Boolean(existingSession.consumedAt),
         expiresAt: existingSession.expiresAt,
-        ...(sessionPoll.isQa ? { qa: qa.describeSession(sessionPoll, existingSession.id) } : {}),
+        ...(sessionPoll.isQa ? { qa: await qa.describeSession(sessionPoll, existingSession.id) } : {}),
       })
     }
   }
 
-  database.prepare('DELETE FROM poll_voting_sessions WHERE expires_at <= ?').run(now.toISOString())
+  await database.prepare('DELETE FROM poll_voting_sessions WHERE expires_at <= ?').run(now.toISOString())
   const votingSessionId = randomUUID()
   const sessionToken = randomBytes(32).toString('base64url')
   const expiresAt = new Date(now.getTime() + votingSessionDurationSeconds * 1000).toISOString()
-  database.prepare('INSERT INTO poll_voting_sessions (id, poll_id, token_hash, expires_at) VALUES (?, ?, ?, ?)')
+  await database.prepare('INSERT INTO poll_voting_sessions (id, poll_id, token_hash, expires_at) VALUES (?, ?, ?, ?)')
     .run(votingSessionId, pollId, hashSessionToken(sessionToken), expiresAt)
   setVotingSessionCookie(request, response, pollId, sessionToken)
-  response.set('Cache-Control', 'no-store').json({ authenticated: true, voted: false, expiresAt, ...(sessionPoll.isQa ? { qa: qa.describeSession(sessionPoll, votingSessionId) } : {}) })
+  response.set('Cache-Control', 'no-store').json({ authenticated: true, voted: false, expiresAt, ...(sessionPoll.isQa ? { qa: await qa.describeSession(sessionPoll, votingSessionId) } : {}) })
 })
 
-app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'optionImages', maxCount: 8 }, { name: 'questionImage', maxCount: 1 }]), (request, response) => {
+app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'optionImages', maxCount: 8 }, { name: 'questionImage', maxCount: 1 }]), async (request, response) => {
   const question = typeof request.body.question === 'string' ? request.body.question.trim() : ''
   const isQa = request.body.isQa === 'true'
   let parsedOptions
@@ -1380,38 +1143,37 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
   const poll = { id: randomUUID(), question, createdAt: new Date().toISOString() }
   const optionsWithIds = options.map((option) => ({ ...option, id: randomUUID() }))
   const correctOptionId = optionsWithIds.find((option) => option.isCorrect)?.id || null
-  const createPoll = () => inTransaction(() => {
-    database.prepare('INSERT INTO polls (id, question, created_at,     logo_mime_type,     logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  await inTransaction(async () => {
+    await database.prepare('INSERT INTO polls (id, question, created_at,     logo_mime_type,     logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
               .run(poll.id, question, poll.createdAt, logoFile?.mimetype || null, logoFile?.buffer || null, Number(isQa), correctOptionId, questionImageFile?.mimetype || null, questionImageFile?.buffer || null, Number(isQa && request.body.revealCorrect === 'true'))
-    const insertOption = database.prepare('INSERT INTO poll_options (id, poll_id, label, position, votes, image_mime_type, image) VALUES (?, ?, ?, ?, 0, ?, ?)')
-    optionsWithIds.forEach((option, index) => {
+    const insertOption = database.prepare('INSERT INTO poll_options (id, poll_id, label, `position`, votes, image_mime_type, image) VALUES (?, ?, ?, ?, 0, ?, ?)')
+    for (const [index, option] of optionsWithIds.entries()) {
       const file = option.imageIndex === null ? null : optionFiles[option.imageIndex]
-      insertOption.run(option.id, poll.id, option.label, index, file?.mimetype || null, file?.buffer || null)
-    })
+      await insertOption.run(option.id, poll.id, option.label, index, file?.mimetype || null, file?.buffer || null)
+    }
   })
-  createPoll()
-  audit(request, 'poll.create', 'poll', poll.id, { isQa })
-  response.status(201).json(getPoll(poll.id, { admin: true }))
+  await audit(request, 'poll.create', 'poll', poll.id, { isQa })
+  response.status(201).json(await getPoll(poll.id, { admin: true }))
 })
 
-app.patch('/api/polls/:id/settings', requireUser, (request, response) => {
+app.patch('/api/polls/:id/settings', requireUser, async (request, response) => {
   const pollId = request.params.id
-  if (!selectPoll.get(pollId)) return response.status(404).json({ error: 'This poll could not be found.' })
+  if (!(await selectPoll.get(pollId))) return response.status(404).json({ error: 'This poll could not be found.' })
   const { votingEnabled, videoEnabled, revealCorrect } = request.body || {}
   if ([votingEnabled, videoEnabled, revealCorrect].some((value) => value !== undefined && typeof value !== 'boolean')) {
     return response.status(400).json({ error: 'Poll settings must be true or false.' })
   }
-  if (votingEnabled !== undefined) database.prepare('UPDATE polls SET voting_enabled = ? WHERE id = ?').run(Number(votingEnabled), pollId)
-  if (videoEnabled !== undefined) database.prepare('UPDATE polls SET video_enabled = ? WHERE id = ?').run(Number(videoEnabled), pollId)
-  if (revealCorrect !== undefined) database.prepare('UPDATE polls SET reveal_correct = ? WHERE id = ?').run(Number(revealCorrect), pollId)
-  audit(request, 'poll.settings', 'poll', pollId, { votingEnabled, videoEnabled, revealCorrect })
-  response.json(getPoll(pollId, { admin: true }))
+  if (votingEnabled !== undefined) await database.prepare('UPDATE polls SET voting_enabled = ? WHERE id = ?').run(Number(votingEnabled), pollId)
+  if (videoEnabled !== undefined) await database.prepare('UPDATE polls SET video_enabled = ? WHERE id = ?').run(Number(videoEnabled), pollId)
+  if (revealCorrect !== undefined) await database.prepare('UPDATE polls SET reveal_correct = ? WHERE id = ?').run(Number(revealCorrect), pollId)
+  await audit(request, 'poll.settings', 'poll', pollId, { votingEnabled, videoEnabled, revealCorrect })
+  response.json(await getPoll(pollId, { admin: true }))
 })
 
-app.post('/api/polls/:id/votes', (request, response, next) => {
+app.post('/api/polls/:id/votes', async (request, response, next) => {
   const pollId = request.params.id
   const { optionId } = request.body || {}
-  const poll = selectPoll.get(pollId)
+  const poll = await selectPoll.get(pollId)
   if (!poll) return response.status(404).json({ error: 'This poll could not be found.' })
   if (poll.isQa) return next()
   if (!poll.votingEnabled) return response.status(423).json({ error: 'Voting is currently disabled for this poll.' })
@@ -1423,30 +1185,30 @@ app.post('/api/polls/:id/votes', (request, response, next) => {
     return response.status(403).json({ error: 'Your voting session is missing or invalid. Reload the poll to continue.' })
   }
 
-  const castVote = inTransaction(() => {
-    const votingSession = database.prepare(`
+  const castVote = await inTransaction(async () => {
+    const votingSession = await database.prepare(`
       SELECT id, expires_at AS expiresAt, consumed_at AS consumedAt
       FROM poll_voting_sessions
       WHERE token_hash = ? AND poll_id = ?
     `).get(hashSessionToken(token), pollId)
     if (!votingSession || Date.parse(votingSession.expiresAt) <= Date.now()) return 'invalid-session'
     if (votingSession.consumedAt) return 'duplicate'
-    const option = database.prepare('SELECT id FROM poll_options WHERE id = ? AND poll_id = ?').get(optionId, pollId)
+    const option = await database.prepare('SELECT id FROM poll_options WHERE id = ? AND poll_id = ?').get(optionId, pollId)
     if (!option) return 'invalid-option'
     const createdAt = new Date().toISOString()
-    const consumed = database.prepare('UPDATE poll_voting_sessions SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND expires_at > ?')
+    const consumed = await database.prepare('UPDATE poll_voting_sessions SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND expires_at > ?')
       .run(createdAt, votingSession.id, createdAt)
     if (consumed.changes !== 1) return 'duplicate'
-    database.prepare('INSERT INTO poll_voters (poll_id, voter_id, option_id, created_at, voting_session_id) VALUES (?, ?, ?, ?, ?)')
+    await database.prepare('INSERT INTO poll_voters (poll_id, voter_id, option_id, created_at, voting_session_id) VALUES (?, ?, ?, ?, ?)')
       .run(pollId, votingSession.id, optionId, createdAt, votingSession.id)
-    database.prepare('UPDATE poll_options SET votes = votes + 1 WHERE id = ?').run(optionId)
+    await database.prepare('UPDATE poll_options SET votes = votes + 1 WHERE id = ?').run(optionId)
     return 'ok'
   })
 
   if (castVote === 'invalid-session') return response.status(403).json({ error: 'Your voting session is missing or expired. Reload the poll to continue.' })
   if (castVote === 'duplicate') return response.status(409).json({ error: 'A vote has already been recorded from this voting session.' })
   if (castVote === 'invalid-option') return response.status(400).json({ error: 'Choose one of the poll options.' })
-  response.json(getPoll(pollId))
+  response.json(await getPoll(pollId))
 })
 
 const qa = registerQaRoutes({
@@ -1496,11 +1258,11 @@ function adVideoSummary(video) {
     : { available: false }
 }
 
-app.get('/api/admin/ad-videos', requireAdmin, (_request, response) => {
-  response.json({ poll: adVideoSummary(selectAdVideo('poll')), qa: adVideoSummary(selectAdVideo('qa')), game: adVideoSummary(selectAdVideo('game')), selfie: adVideoSummary(selectAdVideo('selfie')), maxBytes: adVideoMaxBytes })
+app.get('/api/admin/ad-videos', requireAdmin, async (_request, response) => {
+  response.json({ poll: adVideoSummary(await selectAdVideo('poll')), qa: adVideoSummary(await selectAdVideo('qa')), game: adVideoSummary(await selectAdVideo('game')), selfie: adVideoSummary(await selectAdVideo('selfie')), maxBytes: adVideoMaxBytes })
 })
 
-app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoUpload.single('video'), (request, response) => {
+app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoUpload.single('video'), async (request, response) => {
   const file = request.file
   if (!file) return response.status(400).json({ error: 'Choose an MP4 or WebM video.' })
   if (!hasValidVideoSignature(file.mimetype, file.path)) {
@@ -1510,32 +1272,32 @@ app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoU
   const kind = request.params.kind
   const fileName = `${kind}-${randomUUID()}${adVideoTypes[file.mimetype]}`
   renameSync(file.path, path.join(adVideosDirectory, fileName))
-  const previous = selectAdVideo(kind)
-  database.prepare(`
+  const previous = await selectAdVideo(kind)
+  await database.prepare(`
     INSERT INTO ad_videos (kind, file_name, original_name, mime_type, size, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(kind) DO UPDATE SET file_name = excluded.file_name, original_name = excluded.original_name,
-      mime_type = excluded.mime_type, size = excluded.size, updated_at = excluded.updated_at
+    ON DUPLICATE KEY UPDATE file_name = VALUES(file_name), original_name = VALUES(original_name),
+      mime_type = VALUES(mime_type), size = VALUES(size), updated_at = VALUES(updated_at)
   `).run(kind, fileName, path.basename(file.originalname).slice(0, 120), file.mimetype, file.size, new Date().toISOString())
   if (previous) removeAdVideoFile(previous.fileName)
-  audit(request, 'ad-video.upload', 'ad-video', kind, { size: file.size })
-  response.json(adVideoSummary(selectAdVideo(kind)))
+  await audit(request, 'ad-video.upload', 'ad-video', kind, { size: file.size })
+  response.json(adVideoSummary(await selectAdVideo(kind)))
 })
 
-app.delete('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, (request, response) => {
-  const previous = selectAdVideo(request.params.kind)
+app.delete('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, async (request, response) => {
+  const previous = await selectAdVideo(request.params.kind)
   if (!previous) return response.status(404).json({ error: 'No video has been uploaded for this slot.' })
-  database.prepare('DELETE FROM ad_videos WHERE kind = ?').run(request.params.kind)
+  await database.prepare('DELETE FROM ad_videos WHERE kind = ?').run(request.params.kind)
   removeAdVideoFile(previous.fileName)
-  audit(request, 'ad-video.delete', 'ad-video', request.params.kind)
+  await audit(request, 'ad-video.delete', 'ad-video', request.params.kind)
   response.status(204).end()
 })
 
-app.get('/api/ad-videos/:kind', requireAdVideoKind, (request, response) => {
-  response.set('Cache-Control', 'no-store').json(adVideoSummary(selectAdVideo(request.params.kind)))
+app.get('/api/ad-videos/:kind', requireAdVideoKind, async (request, response) => {
+  response.set('Cache-Control', 'no-store').json(adVideoSummary(await selectAdVideo(request.params.kind)))
 })
 
-app.get('/api/ad-videos/:kind/file', requireAdVideoKind, (request, response) => {
-  const video = selectAdVideo(request.params.kind)
+app.get('/api/ad-videos/:kind/file', requireAdVideoKind, async (request, response) => {
+  const video = await selectAdVideo(request.params.kind)
   if (!video) return response.status(404).end()
   response.type(video.mimeType).set('X-Content-Type-Options', 'nosniff').sendFile(path.join(adVideosDirectory, path.basename(video.fileName)), (error) => {
     if (error && !response.headersSent) response.status(404).end()
@@ -1547,6 +1309,10 @@ app.use((error, _request, response, _next) => {
     if (_request.path.startsWith('/admin/ad-videos/')) return response.status(413).json({ error: `Videos must be ${Math.ceil(adVideoMaxBytes / 1024 / 1024)} MB or smaller.` })
     const limit = _request.path.startsWith('/admin/theme/') ? `${Math.ceil(themeImageMaxBytes / 1024 / 1024)} MB` : '5 MB'
     return response.status(413).json({ error: `Images must be ${limit} or smaller.` })
+  }
+  if (error?.sqlState || error?.errno || error?.code === 'ER_LOCK_WAIT_TIMEOUT') {
+    console.error('Database error:', error)
+    return response.status(500).json({ error: 'The server could not complete the request.' })
   }
   response.status(400).json({ error: error.message || 'The upload could not be processed.' })
 })

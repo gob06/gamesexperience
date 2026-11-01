@@ -7,13 +7,13 @@
     "dev": "concurrently -k \"node server/index.js\" \"vite --host 0.0.0.0\"",
     "build": "tsc -b && vite build",
     "start": "node server/index.js",
-    "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.js"
+    "migrate:mariadb": "node scripts/migrate-sqlite-to-mariadb.js"
   },
   "dependencies": {
     "express": "^4.21.2",
     "lucide-react": "^0.468.0",
     "multer": "^2.0.2",
-    "pg": "^8.16.3",
+    "mysql2": "^3.24.6",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
