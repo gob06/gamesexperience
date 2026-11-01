@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/polls.json
+data/selfies.json
+data/selfies/
+data/ad-videos/
+data/theme-assets/
+data/roomvote.sqlite*
