@@ -976,3 +976,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .monitor-toast { position: fixed; top: 18px; left: 50%; z-index: 100; padding: 14px 26px; border-radius: 999px; color: #1b1b1f; background: #f4cf51; font-size: 1.2rem; font-weight: 800; box-shadow: 0 10px 40px #000a; transform: translateX(-50%); animation: toast-in .4s ease-out; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -30px); } }
 @keyframes monitor-flash { from { background: #f4cf5166; } }
+
+/* Avant Garde everywhere; falls back to the closest geometric sans installed. */
+:root { --mono: 'ITC Avant Garde Gothic', 'Avant Garde', AvantGarde, 'URW Gothic', 'TeX Gyre Adventor', 'Century Gothic', CenturyGothic, 'Questrial', sans-serif; }
+*, *::before, *::after { font-family: var(--mono) !important; }
