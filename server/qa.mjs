@@ -2,8 +2,8 @@ import { EventEmitter } from 'node:events'
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { rateLimit } from './rate-limit.js'
-import { isDuplicateKeyError } from './db.js'
+import { rateLimit } from './rate-limit.mjs'
+import { isDuplicateKeyError } from './db.mjs'
 
 const namePattern = /^[\p{L}\p{M}][\p{L}\p{M}\p{N} .,'’-]{1,79}$/u
 const ticketPattern = /^[A-Za-z0-9][A-Za-z0-9_\-/]{0,39}$/
