@@ -1141,6 +1141,20 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
   }, [pollId])
 
   useEffect(() => {
+    function enterFullscreen() {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => undefined)
+    }
+    // Browsers only allow fullscreen after a user gesture, so retry on the first interaction.
+    enterFullscreen()
+    window.addEventListener('pointerdown', enterFullscreen, { once: true })
+    window.addEventListener('keydown', enterFullscreen, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', enterFullscreen)
+      window.removeEventListener('keydown', enterFullscreen)
+    }
+  }, [])
+
+  useEffect(() => {
     let active = true
     void getPollShareUrl(pollId).then((url) => { if (active) setShareUrl(url) })
     return () => { active = false }

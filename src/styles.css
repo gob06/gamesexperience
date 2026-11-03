@@ -980,3 +980,11 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 /* Avant Garde everywhere; falls back to the closest geometric sans installed. */
 :root { --mono: 'ITC Avant Garde Gothic', 'Avant Garde', AvantGarde, 'URW Gothic', 'TeX Gyre Adventor', 'Century Gothic', CenturyGothic, 'Questrial', sans-serif; }
 *, *::before, *::after { font-family: var(--mono) !important; }
+
+/* Live results display: centered content */
+.display-shell { justify-content: center; align-items: center; }
+.display-heading, .display-grid { width: 100%; max-width: 1400px; }
+.display-heading { justify-content: center; align-items: center; text-align: center; }
+.display-heading > div:first-child { display: flex; flex-direction: column; align-items: center; }
+.display-grid { flex: 0 1 auto; align-items: center; }
+.display-join { align-self: center; }
