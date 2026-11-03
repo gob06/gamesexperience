@@ -1067,3 +1067,5 @@ input::placeholder, textarea::placeholder { color: #827b85; }
   .display-result { grid-template-columns: clamp(100px, 17vh, 200px) minmax(0, 1fr); }
   .display-heading h1 { font-size: clamp(56px, 8vh, 96px); }
 }
+
+.display-join p.display-scan { margin: 12px 0 4px; color: #fff8f1; font-weight: 700; font-size: clamp(28px, 4.5vh, 60px); line-height: 1.1; text-align: center; letter-spacing: .02em; }
