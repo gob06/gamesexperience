@@ -1184,7 +1184,6 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
           {poll.questionImageUrl &&  <img className="question-image display-question-image" src={poll.questionImageUrl} alt={poll.question || 'Question'} />}
           {(poll.question || !poll.questionImageUrl) && <h1>{poll.question}</h1>}
         </div>
-        {!poll.isQa && <div className="display-total"><strong>{totalVotes.toLocaleString()}</strong><span>VOTES CAST</span></div>}
       </section>
       <section className="display-grid">
         <div className="display-results" aria-label={poll.isQa ? 'First correct Q&A answer' : 'Live poll results'}>
