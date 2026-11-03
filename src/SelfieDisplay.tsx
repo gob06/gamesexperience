@@ -8,6 +8,7 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
   const qrRef = useRef<HTMLCanvasElement>(null)
   const [joinUrl, setJoinUrl] = useState('')
   const [photos, setPhotos] = useState<Submission[]>([])
+  const [index, setIndex] = useState(0)
   const [closed, setClosed] = useState(false)
   const [error, setError] = useState('')
 
@@ -90,15 +91,26 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
   }, [])
 
   const imageUrl = (id: string) => `/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/image`
-  const count = Math.min(Math.max(photos.length, 1), 12)
-  const columns = count <= 1 ? 1 : count <= 4 ? 2 : count <= 9 ? 3 : 4
+  const slides = [...photos].reverse()
+  const current = slides.length ? slides[index % slides.length] : null
+
+  useEffect(() => {
+    if (slides.length < 2) return
+    const timer = window.setInterval(() => setIndex((value) => value + 1), 5000)
+    return () => window.clearInterval(timer)
+  }, [slides.length])
 
   return (
     <main className="selfie-display">
-      <section className="selfie-display-wall" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }} aria-label="Live guest photos">
-        {photos.length === 0 ? (
+      <section className="selfie-display-wall" aria-label="Live guest photos">
+        {!current ? (
           <p className="selfie-display-empty">{closed ? 'This selfie session has ended.' : error || 'Photos will appear here as guests send them.'}</p>
-        ) : photos.slice(0, 12).map((photo) => <img key={photo.id} src={imageUrl(photo.id)} alt="Guest photo" />)}
+        ) : (
+          <div className="selfie-slide" key={current.id}>
+            <img className="selfie-slide-backdrop" src={imageUrl(current.id)} alt="" />
+            <img className="selfie-slide-photo" src={imageUrl(current.id)} alt="Guest photo" />
+          </div>
+        )}
       </section>
       <aside className="selfie-display-qr">
         <canvas ref={qrRef} aria-label="Scan to share your selfie" />

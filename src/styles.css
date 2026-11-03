@@ -1104,3 +1104,10 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 @media (min-width: 900px) {
   .display-grid { gap: 14px; grid-template-columns: minmax(0, 1fr) calc(max(380px, 36vw) + clamp(30px, 5vw, 76px) - 14px); }
 }
+
+.selfie-display-wall { display: block; position: relative; overflow: hidden; padding: 0; }
+.selfie-slide { position: absolute; inset: 0; animation: selfie-slide-in .9s ease both; }
+.selfie-slide-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(28px) brightness(.5); transform: scale(1.1); border-radius: 0; }
+.selfie-slide-photo { position: relative; width: 100%; height: 100%; object-fit: contain; border-radius: 0; }
+@keyframes selfie-slide-in { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: scale(1); } }
+.selfie-display-wall .selfie-display-empty { position: absolute; inset: 0; }
