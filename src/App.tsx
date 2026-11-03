@@ -1205,14 +1205,16 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
                 const percent = totalVotes ? Math.round(option.votes / totalVotes * 100) : 0
                 return (
                   <article className={`display-result result-tone-${index % 4}`} key={option.id}>
-                    <div className="display-result-top">
-                      <span className="display-result-index">{String(index + 1).padStart(2, '0')}</span>
-                      <span className="display-result-image">{option.imageUrl && <img src={option.imageUrl} alt="" />}</span>
-                      <h2>{option.label}</h2>
-                      <span className="display-result-percent">{percent}<small>%</small></span>
+                    <span className="display-result-image">{option.imageUrl && <img src={option.imageUrl} alt="" />}</span>
+                    <div className="display-result-body">
+                      <div className="display-result-top">
+                        <span className="display-result-index">{String(index + 1).padStart(2, '0')}</span>
+                        <h2>{option.label}</h2>
+                        <span className="display-result-percent">{percent}<small>%</small></span>
+                      </div>
+                      <div className="display-meter"><span style={{ width: `${percent}%` }} /></div>
+                      <div className="display-result-count">{option.votes.toLocaleString()} {option.votes === 1 ? 'VOTE' : 'VOTES'}</div>
                     </div>
-                    <div className="display-meter"><span style={{ width: `${percent}%` }} /></div>
-                    <div className="display-result-count">{option.votes.toLocaleString()} {option.votes === 1 ? 'VOTE' : 'VOTES'}</div>
                   </article>
                 )
               })}
