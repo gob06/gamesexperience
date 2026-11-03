@@ -33,6 +33,7 @@ import QaEditDialog from './QaEditDialog'
 import PollEditDialog from './PollEditDialog'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 import SelfieCam, { SelfieParticipant } from './SelfieCam'
+import SelfieDisplay from './SelfieDisplay'
 import { ThemeBrand } from './theme'
 import VanishingGame from './VanishingGame'
 
@@ -62,6 +63,7 @@ const monitorPath = window.location.pathname.match(/^\/poll\/([^/]+)\/monitor\/?
 const gamePath = window.location.pathname.match(/^\/game(?:\/([^/]+))?\/?$/)
 const selfiePath = /^\/selfie\/?$/.test(window.location.pathname)
 const selfieJoinPath = window.location.pathname.match(/^\/selfie\/join\/([A-Za-z0-9_-]+)\/?$/)
+const selfieDisplayPath = window.location.pathname.match(/^\/selfie\/display\/([A-Za-z0-9_-]+)\/?$/)
 
 async function requestPolls(): Promise<Poll[]> {
   const response = await fetch('/api/polls')
@@ -433,6 +435,7 @@ function App() {
       ? <AdminUsersPage currentUser={authUser} onLogout={() => void logout()} />
       : <AccessDeniedPage onLogout={() => void logout()} />
   }
+  if (selfieDisplayPath) return <SelfieDisplay sessionId={selfieDisplayPath[1]} joinToken={decodeURIComponent(window.location.hash.slice(1))} />
   if (selfiePath) return <SelfieCam />
   if (gamePath && !gamePath[1]) {
     return authUser.role === 'admin'

@@ -8,7 +8,7 @@ import { SavedLogoPicker, saveLogo, type SavedLogo } from './logoLibrary'
 type SelfieSession = { id: string; joinToken: string; expiresAt: string }
 type SelfieSubmission = { id: string; fileName: string; status: 'pending' | 'approved'; createdAt: string }
 
-async function getJoinUrl(token: string) {
+export async function getSelfieJoinUrl(token: string) {
   const path = `/selfie/join/${encodeURIComponent(token)}`
   const url = new URL(path, window.location.origin)
   if (!['localhost', '127.0.0.1'].includes(window.location.hostname)) return url.href
@@ -69,7 +69,7 @@ export default function SelfieCam() {
       const response = await fetch('/api/selfie/sessions', { method: 'POST' })
       const result = await response.json() as SelfieSession & { error?: string }
       if (!response.ok || !result.id || !result.joinToken) throw new Error(result.error || 'Could not create a selfie session.')
-      const url = await getJoinUrl(result.joinToken)
+      const url = await getSelfieJoinUrl(result.joinToken)
       setSession(result)
       setJoinUrl(url)
       setSubmissions([])
@@ -252,6 +252,7 @@ export default function SelfieCam() {
                 <div className="selfie-qr-frame"><canvas ref={qrCanvasRef} aria-label="Scan this QR code to submit a selfie" /></div>
                 <p>Scan with a phone camera. Photos must be approved before they appear on screen.</p>
                 <a href={joinUrl} target="_blank" rel="noreferrer">Open guest upload page</a>
+                <a className="button button-primary" href={`/selfie/display/${encodeURIComponent(session.id)}#${encodeURIComponent(session.joinToken)}`} target="_blank" rel="noreferrer"><Maximize size={15} /> Open live screen (QR + photos)</a>
                 <span className="selfie-expiry">Session ends {new Date(session.expiresAt).toLocaleTimeString()}</span>
               </div>
               <div className="selfie-review-heading"><h3>Photo review</h3><span>{pendingSubmissions.length} waiting · {approvedSubmissions.length} approved</span></div>
