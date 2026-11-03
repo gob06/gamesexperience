@@ -1152,9 +1152,14 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
     enterFullscreen()
     window.addEventListener('pointerdown', enterFullscreen, { once: true })
     window.addEventListener('keydown', enterFullscreen, { once: true })
+    function exitFullscreen() {
+      if (document.fullscreenElement) void document.exitFullscreen()
+    }
+    window.addEventListener('dblclick', exitFullscreen)
     return () => {
       window.removeEventListener('pointerdown', enterFullscreen)
       window.removeEventListener('keydown', enterFullscreen)
+      window.removeEventListener('dblclick', exitFullscreen)
     }
   }, [])
 
