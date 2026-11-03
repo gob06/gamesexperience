@@ -338,7 +338,8 @@ export function SelfieParticipant({ token }: { token: string }) {
   async function startCamera() {
     setError('')
     if (!navigator.mediaDevices?.getUserMedia) {
-      setError('Camera access requires HTTPS or localhost. You can upload a photo instead.')
+      // Without HTTPS the live preview is blocked, but the capture input still opens the phone's camera app.
+      fileInputRef.current?.click()
       return
     }
     try {
