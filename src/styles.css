@@ -1100,9 +1100,3 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 
 .vote-card .submit-vote { display: flex; width: auto; min-width: 220px; margin: 20px auto 0; justify-content: center; }
 .vote-card { padding-bottom: 32px; }
-
-.display-shell { align-items: stretch; }
-.display-heading { justify-content: flex-start; text-align: left; }
-.display-heading > div:first-child { align-items: flex-start; text-align: left; }
-.display-heading h1 { text-align: left; }
-.display-grid { justify-content: flex-start; }
