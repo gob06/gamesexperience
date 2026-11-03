@@ -1038,3 +1038,18 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .display-heading > div:first-child, .display-join { border-color: rgba(255, 255, 255, .28); box-shadow: none; }
 .display-result { border-top-color: rgba(255, 255, 255, .18); border-right-color: rgba(255, 255, 255, .18); border-bottom-color: rgba(255, 255, 255, .18); }
 .display-meter { background: rgba(255, 255, 255, .18); }
+
+@media (min-width: 900px) {
+  .display-result { padding: 8px 18px 8px 8px; gap: 22px; }
+  .display-result-image { align-self: stretch; width: auto; height: auto; aspect-ratio: 1; min-height: 0; }
+  .display-result h2 { font-size: 34px; }
+  .display-result-percent { font-size: 52px; }
+  .display-result-count { font-size: 14px; }
+}
+
+@media (min-width: 900px) {
+  .display-result { grid-template-columns: clamp(100px, 16vh, 150px) minmax(0, 1fr); overflow: hidden; }
+  .display-result-image { width: 100%; height: 100%; aspect-ratio: auto; align-self: stretch; }
+  .display-result h2 { font-size: 28px; line-height: 1.1; }
+  .display-result-percent { font-size: 46px; }
+}
