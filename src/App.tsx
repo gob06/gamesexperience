@@ -955,9 +955,7 @@ function ShareDialog({ poll, onClose, copied, setCopied }: { poll: Poll; onClose
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <section className="modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title">
         <button className="icon-button modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
-        <div className="modal-kicker"><span className="live-indicator" /> POLL IS READY</div>
-        <h2 id="share-title">Cast your vote for the</h2>
-        <p className="share-question">{poll.question || 'Image question'}</p>
+        <p id="share-title" className="share-question">{poll.question || 'Image question'}</p>
         <div className="qr-frame">{shareUrl ? <PollQrCode value={shareUrl} logoUrl={poll.logoUrl} size={240} label="QR code for this poll" /> : <span className="scan-caption">Preparing QR code…</span>}</div>
         <p className="scan-caption">Open your camera and point it here</p>
         <p className="share-help">Keep your phone on the same Wi-Fi network, then scan the QR to open the poll.</p>
