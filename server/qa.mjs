@@ -370,6 +370,8 @@ export function registerQaRoutes({
       return response.status(400).json({ error: 'Add a question of 3–160 characters.' })
     }
     if (body.revealCorrect !== undefined && typeof body.revealCorrect !== 'boolean') return response.status(400).json({ error: 'Reveal setting must be true or false.' })
+    const joinTitle = body.joinTitle === undefined ? undefined : typeof body.joinTitle === 'string' ? body.joinTitle.trim() : null
+    if (joinTitle === null || (joinTitle !== undefined && joinTitle.length > 80)) return response.status(400).json({ error: 'The join title must be 80 characters or fewer.' })
     const optionIds = new Set((await database.prepare('SELECT id FROM poll_options WHERE poll_id = ?').all(poll.id)).map((option) => option.id))
     const labels = Array.isArray(body.options) ? body.options.map((option) => ({ id: option?.id, label: typeof option?.label === 'string' ? option.label.trim() : '' })) : []
     if (body.options !== undefined && (!Array.isArray(body.options) || labels.some((option) => !optionIds.has(option.id) || !option.label || option.label.length > 80))) {
@@ -382,6 +384,7 @@ export function registerQaRoutes({
     }
     await inTransaction(async () => {
       if (question !== undefined) await database.prepare('UPDATE polls SET question = ? WHERE id = ?').run(question, poll.id)
+      if (joinTitle !== undefined) await database.prepare('UPDATE polls SET join_title = ? WHERE id = ?').run(joinTitle || null, poll.id)
       if (body.revealCorrect !== undefined) await database.prepare('UPDATE polls SET reveal_correct = ? WHERE id = ?').run(Number(body.revealCorrect), poll.id)
       if (body.correctOptionId !== undefined) await database.prepare('UPDATE polls SET correct_option_id = ? WHERE id = ?').run(body.correctOptionId, poll.id)
       for (const option of labels) await database.prepare('UPDATE poll_options SET label = ? WHERE id = ? AND poll_id = ?').run(option.label, option.id, poll.id)

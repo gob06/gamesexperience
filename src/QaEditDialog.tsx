@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 type EditablePoll = {
   id: string
   question: string
+  joinTitle?: string | null
   questionImageUrl?: string | null
   options: Array<{ id: string; label: string }>
   revealCorrect?: boolean
@@ -13,6 +14,7 @@ type EditablePoll = {
 
 export default function QaEditDialog<T extends EditablePoll>({ poll, onClose, onSaved }: { poll: T; onClose: () => void; onSaved: (poll: T) => void }) {
   const [question, setQuestion] = useState(poll.question)
+  const [joinTitle, setJoinTitle] = useState(poll.joinTitle ?? '')
   const [labels, setLabels] = useState(poll.options.map((option) => option.label))
   const [correctOptionId, setCorrectOptionId] = useState(poll.correctOptionId ?? '')
   const [revealCorrect, setRevealCorrect] = useState(Boolean(poll.revealCorrect))
@@ -30,6 +32,7 @@ export default function QaEditDialog<T extends EditablePoll>({ poll, onClose, on
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: question.trim(),
+          joinTitle: joinTitle.trim(),
           options: poll.options.map((option, index) => ({ id: option.id, label: labels[index] })),
           correctOptionId,
           revealCorrect,
@@ -52,6 +55,8 @@ export default function QaEditDialog<T extends EditablePoll>({ poll, onClose, on
         <h2 id="qa-edit-title">Edit Q&amp;A</h2>
         <label className="field-label" htmlFor="qa-edit-question">Question</label>
         <textarea id="qa-edit-question" value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={160} rows={2} required={!poll.questionImageUrl} />
+        <label className="field-label" htmlFor="qa-edit-join-title">Join title (live results page)</label>
+        <input id="qa-edit-join-title" value={joinTitle} onChange={(event) => setJoinTitle(event.target.value)} maxLength={80} placeholder="JOIN THE Q&A" />
         <span className="field-label">Answers{locked ? ' · the correct answer is locked because participants have already answered' : ' · select the correct answer'}</span>
         <div className="option-list">
           {poll.options.map((option, index) => (

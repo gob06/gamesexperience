@@ -37,7 +37,7 @@ import { ThemeBrand } from './theme'
 import VanishingGame from './VanishingGame'
 
 type PollOption = { id: string; label: string; votes: number; imageUrl?: string | null }
-type Poll = { id: string; question: string; questionImageUrl?: string | null; options: PollOption[]; createdAt: string; logoUrl?: string | null; isQa: boolean; winnerName?: string; winnerTicketNumber?: string; winnerAnswer?: string; votingEnabled: boolean; videoEnabled: boolean; revealCorrect?: boolean; correctOptionId?: string | null; stats?: { participants: number; submissions: number; winners: number; nonWinners: number } }
+type Poll = { id: string; question: string; joinTitle?: string | null; questionImageUrl?: string | null; options: PollOption[]; createdAt: string; logoUrl?: string | null; isQa: boolean; winnerName?: string; winnerTicketNumber?: string; winnerAnswer?: string; votingEnabled: boolean; videoEnabled: boolean; revealCorrect?: boolean; correctOptionId?: string | null; stats?: { participants: number; submissions: number; winners: number; nonWinners: number } }
 type AuthUser = { id: string; username: string; role: 'admin' | 'host' }
 type OptionDraft = { label: string; imageFile: File | null; previewUrl: string }
 type GameRoomSummary = {
@@ -955,7 +955,7 @@ function ShareDialog({ poll, onClose, copied, setCopied }: { poll: Poll; onClose
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <section className="modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title">
         <button className="icon-button modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
-        <div className="modal-kicker"><QrCode size={15} /> <span id="share-title">{poll.isQa ? 'JOIN THE Q&A' : 'JOIN THE VOTE'}</span></div>
+        <div className="modal-kicker"><QrCode size={15} /> <span id="share-title">{poll.joinTitle || (poll.isQa ? 'JOIN THE Q&A' : 'JOIN THE VOTE')}</span></div>
         <p className="share-question">{poll.question || 'Image question'}</p>
         <div className="qr-frame">{shareUrl ? <PollQrCode value={shareUrl} logoUrl={poll.logoUrl} size={240} label="QR code for this poll" /> : <span className="scan-caption">Preparing QR code…</span>}</div>
         <p className="scan-caption">Open your camera and point it here</p>
@@ -1217,7 +1217,7 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
           )}
         </div>
         <aside className="display-join">
-          <div className="join-kicker"><QrCode size={15} /> {poll.isQa ? 'JOIN THE Q&A' : 'JOIN THE VOTE'}</div>
+          <div className="join-kicker"><QrCode size={15} /> {poll.joinTitle || (poll.isQa ? 'JOIN THE Q&A' : 'JOIN THE VOTE')}</div>
           <div className="display-qr">{shareUrl && poll ? <PollQrCode value={shareUrl} logoUrl={poll.logoUrl} size={220} label={poll.isQa ? 'Scan to join this Q&A' : 'Scan to vote in this poll'} /> : <span>Loading QR…</span>}</div>
           <p>{poll.isQa ? 'Point your phone camera at the code to enter your answer.' : 'Point your phone camera at the code to cast your vote.'}</p>
         </aside>

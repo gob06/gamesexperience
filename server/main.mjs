@@ -86,7 +86,7 @@ app.get('/api/network-addresses', (_request, response) => {
   response.json({ addresses })
 })
 
-const selectPoll = database.prepare("SELECT id, question, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/logo') END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/question-image') END AS questionImageUrl FROM polls WHERE id = ?")
+const selectPoll = database.prepare("SELECT id, question, join_title AS joinTitle, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/logo') END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/question-image') END AS questionImageUrl FROM polls WHERE id = ?")
 const selectQaWinner = database.prepare('SELECT v.voter_id AS voterId, v.first_name AS firstName, v.ticket_number AS ticketNumber, o.label AS answer FROM poll_voters v JOIN poll_options o ON o.id = v.option_id WHERE v.poll_id = ? AND v.is_correct = 1 ORDER BY v.created_at, v.seq LIMIT 1')
 const selectQaStats = database.prepare('SELECT (SELECT COUNT(*) FROM poll_voting_sessions WHERE poll_id = ? AND ticket_key IS NOT NULL) AS participants, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND option_id IS NOT NULL) AS submissions, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND is_correct = 1) AS winners')
 const selectOptions = database.prepare("SELECT id, label, votes, CASE WHEN image IS NULL THEN NULL ELSE CONCAT('/api/poll-options/', id, '/image') END AS imageUrl FROM poll_options WHERE poll_id = ? ORDER BY `position`")
@@ -1177,16 +1177,18 @@ app.patch('/api/polls/:id', requireUser, async (request, response, next) => {
   const body = request.body || {}
   const question = typeof body.question === 'string' ? body.question.trim() : ''
   if (question.length < 3 || question.length > 160) return response.status(400).json({ error: 'Add a question of 3–160 characters.' })
+  const joinTitle = typeof body.joinTitle === 'string' ? body.joinTitle.trim() : ''
+  if (joinTitle.length > 80) return response.status(400).json({ error: 'The join title must be 80 characters or fewer.' })
   const optionIds = new Set((await database.prepare('SELECT id FROM poll_options WHERE poll_id = ?').all(poll.id)).map((option) => option.id))
   const labels = Array.isArray(body.options) ? body.options.map((option) => ({ id: option?.id, label: typeof option?.label === 'string' ? option.label.trim() : '' })) : []
   if (labels.length !== optionIds.size || labels.some((option) => !optionIds.has(option.id) || !option.label || option.label.length > 80)) {
     return response.status(400).json({ error: 'Answer options must be 1–80 characters.' })
   }
   await inTransaction(async () => {
-    await database.prepare('UPDATE polls SET question = ? WHERE id = ?').run(question, poll.id)
+    await database.prepare('UPDATE polls SET question = ?, join_title = ? WHERE id = ?').run(question, joinTitle || null, poll.id)
     for (const option of labels) await database.prepare('UPDATE poll_options SET label = ? WHERE id = ? AND poll_id = ?').run(option.label, option.id, poll.id)
   })
-  await audit(request, 'poll.edit', 'poll', poll.id, { fields: ['question', 'options'] })
+  await audit(request, 'poll.edit', 'poll', poll.id, { fields: ['question', 'options', 'joinTitle'] })
   response.json(await getPoll(poll.id, { admin: true }))
 })
 
