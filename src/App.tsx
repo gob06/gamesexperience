@@ -1218,7 +1218,7 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
         </div>
         <aside className="display-join">
           <div className="join-kicker"><QrCode size={15} /> {poll.joinTitle || (poll.isQa ? 'JOIN THE Q&A' : 'JOIN THE VOTE')}</div>
-          <div className="display-qr">{shareUrl && poll ? <PollQrCode value={shareUrl} logoUrl={poll.logoUrl} size={220} label={poll.isQa ? 'Scan to join this Q&A' : 'Scan to vote in this poll'} /> : <span>Loading QR…</span>}</div>
+          <div className="display-qr">{shareUrl && poll ? <PollQrCode value={shareUrl} logoUrl={poll.logoUrl} size={480} label={poll.isQa ? 'Scan to join this Q&A' : 'Scan to vote in this poll'} /> : <span>Loading QR…</span>}</div>
           <p>{poll.isQa ? 'Point your phone camera at the code to enter your answer.' : 'Point your phone camera at the code to cast your vote.'}</p>
         </aside>
       </section>
