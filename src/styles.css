@@ -1020,3 +1020,21 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .display-result-top { grid-template-columns: 30px minmax(0, 1fr) auto; }
 .display-meter { margin: 11px 0 7px 0; }
 .display-result-count { margin-left: 0; }
+
+/* Live results: fill the whole screen; frames are translucent so the themed background shows through */
+@media (min-width: 900px) {
+  .display-shell { height: 100vh; min-height: 0; justify-content: stretch; align-items: stretch; padding: clamp(14px, 2.5vh, 32px) clamp(20px, 3vw, 56px); }
+  .display-heading, .display-grid { max-width: none; }
+  .display-heading { flex: 0 0 auto; padding: 0 0 clamp(12px, 2vh, 22px); }
+  .display-heading > div:first-child { width: 100%; padding: clamp(12px, 2.5vh, 26px) 34px; }
+  .display-heading h1 { max-width: none; }
+  .display-grid { flex: 1 1 0; min-height: 0; padding: 0; align-items: stretch; }
+  .display-results { min-height: 0; }
+  .display-result { min-height: 0; }
+  .display-join { min-height: 0; padding: clamp(14px, 2.5vh, 28px); }
+  .display-qr { width: auto; height: auto; flex: 1 1 0; min-height: 0; max-width: 100%; aspect-ratio: 1; }
+}
+.display-heading > div:first-child, .display-result, .display-join, .display-leader { background: rgba(17, 14, 20, .38); backdrop-filter: blur(2px); }
+.display-heading > div:first-child, .display-join { border-color: rgba(255, 255, 255, .28); box-shadow: none; }
+.display-result { border-top-color: rgba(255, 255, 255, .18); border-right-color: rgba(255, 255, 255, .18); border-bottom-color: rgba(255, 255, 255, .18); }
+.display-meter { background: rgba(255, 255, 255, .18); }
