@@ -1114,3 +1114,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 
 .selfie-slide-backdrop { display: none; }
 .selfie-slide-photo { object-fit: cover; }
+
+.selfie-display-qr { --qr-size: min(clamp(220px, 36vh, 400px), 100%); align-items: flex-start; padding-left: clamp(16px, 3vw, 56px); }
+.selfie-display-qr canvas { width: var(--qr-size) !important; height: auto !important; max-height: none; }
+.selfie-display-qr p { width: var(--qr-size); font-size: clamp(20px, 3vh, 40px); }
