@@ -1081,3 +1081,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 
 .display-result-top { grid-template-columns: minmax(0, 1fr) auto !important; }
 .display-result h2, .display-result-count { font-weight: 800 !important; }
+
+@media (min-width: 900px) {
+  .display-meter { height: clamp(22px, 3.4vh, 44px) !important; border-radius: 999px; }
+}
