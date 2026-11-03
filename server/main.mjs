@@ -1170,6 +1170,26 @@ app.patch('/api/polls/:id/settings', requireUser, async (request, response) => {
   response.json(await getPoll(pollId, { admin: true }))
 })
 
+app.patch('/api/polls/:id', requireUser, async (request, response, next) => {
+  const poll = await selectPoll.get(request.params.id)
+  if (!poll) return response.status(404).json({ error: 'This poll could not be found.' })
+  if (poll.isQa) return next()
+  const body = request.body || {}
+  const question = typeof body.question === 'string' ? body.question.trim() : ''
+  if (question.length < 3 || question.length > 160) return response.status(400).json({ error: 'Add a question of 3–160 characters.' })
+  const optionIds = new Set((await database.prepare('SELECT id FROM poll_options WHERE poll_id = ?').all(poll.id)).map((option) => option.id))
+  const labels = Array.isArray(body.options) ? body.options.map((option) => ({ id: option?.id, label: typeof option?.label === 'string' ? option.label.trim() : '' })) : []
+  if (labels.length !== optionIds.size || labels.some((option) => !optionIds.has(option.id) || !option.label || option.label.length > 80)) {
+    return response.status(400).json({ error: 'Answer options must be 1–80 characters.' })
+  }
+  await inTransaction(async () => {
+    await database.prepare('UPDATE polls SET question = ? WHERE id = ?').run(question, poll.id)
+    for (const option of labels) await database.prepare('UPDATE poll_options SET label = ? WHERE id = ? AND poll_id = ?').run(option.label, option.id, poll.id)
+  })
+  await audit(request, 'poll.edit', 'poll', poll.id, { fields: ['question', 'options'] })
+  response.json(await getPoll(poll.id, { admin: true }))
+})
+
 app.post('/api/polls/:id/votes', async (request, response, next) => {
   const pollId = request.params.id
   const { optionId } = request.body || {}

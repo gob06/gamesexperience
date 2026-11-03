@@ -30,6 +30,7 @@ import { AdVideoOverlay, AdVideoSettings } from './AdVideo'
 import QaAudience from './QaAudience'
 import QaMonitor from './QaMonitor'
 import QaEditDialog from './QaEditDialog'
+import PollEditDialog from './PollEditDialog'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 import SelfieCam, { SelfieParticipant } from './SelfieCam'
 import { ThemeBrand } from './theme'
@@ -583,6 +584,7 @@ function App() {
                                                   )}
                                                 </div>
                                                 {poll.isQa && <a className="icon-button" href={`/poll/${poll.id}/monitor`} aria-label={`Open live winner monitor for ${poll.question}`} title="Live winner monitor and history"><Users size={18} /></a>}
+                                                {!poll.isQa && <button className="icon-button" type="button" onClick={() => setEditPoll(poll)} aria-label={`Edit ${poll.question}`} title="Edit poll"><Pencil size={18} /></button>}
                                                 {poll.isQa && <button className="icon-button" type="button" onClick={() => setEditPoll(poll)} aria-label={`Edit ${poll.question}`} title="Edit Q&A"><Pencil size={18} /></button>}
                                                 {poll.isQa && <button className="icon-button" type="button" onClick={() => void deletePoll(poll)} aria-label={`Delete ${poll.question}`} title="Delete Q&A"><Trash2 size={18} /></button>}
                       <button className="icon-button poll-share" onClick={() => setSharePoll(poll)} aria-label={`Show QR code for ${poll.question}`} title="Show QR code"><QrCode size={18} /></button>
@@ -598,7 +600,10 @@ function App() {
       </main>
 
       {sharePoll && <ShareDialog poll={sharePoll} onClose={() => { setSharePoll(null); setCopied(false) }} copied={copied} setCopied={setCopied} />}
-      {editPoll && <QaEditDialog poll={editPoll} onClose={() => setEditPoll(null)} onSaved={(updated) => { setPolls((current) => current.map((item) => item.id === updated.id ? updated : item)); setEditPoll(null) }} />}
+      {editPoll && (() => {
+        const Dialog = editPoll.isQa ? QaEditDialog : PollEditDialog
+        return <Dialog poll={editPoll} onClose={() => setEditPoll(null)} onSaved={(updated) => { setPolls((current) => current.map((item) => item.id === updated.id ? updated : item)); setEditPoll(null) }} />
+      })()}
     </div>
   )
 }
