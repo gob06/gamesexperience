@@ -1097,3 +1097,6 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 
 .vote-shell-centered { display: flex; align-items: center; justify-content: center; }
 .vote-shell-centered .vote-main { margin: 24px auto; }
+
+.vote-card .submit-vote { display: flex; width: auto; min-width: 220px; margin: 20px auto 0; justify-content: center; }
+.vote-card { padding-bottom: 32px; }
