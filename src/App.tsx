@@ -1208,7 +1208,6 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
                     <span className="display-result-image">{option.imageUrl && <img src={option.imageUrl} alt="" />}</span>
                     <div className="display-result-body">
                       <div className="display-result-top">
-                        <span className="display-result-index">{String(index + 1).padStart(2, '0')}</span>
                         <h2>{option.label}</h2>
                         <span className="display-result-percent">{percent}<small>%</small></span>
                       </div>

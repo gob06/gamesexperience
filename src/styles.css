@@ -1078,3 +1078,6 @@ input::placeholder, textarea::placeholder { color: #827b85; }
   .display-result-count, .display-result-index { font-size: 50px; line-height: 1; }
   .display-result-top { grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; }
 }
+
+.display-result-top { grid-template-columns: minmax(0, 1fr) auto !important; }
+.display-result h2, .display-result-count { font-weight: 800 !important; }
