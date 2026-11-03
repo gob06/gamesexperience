@@ -1057,3 +1057,13 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 @media (min-width: 900px) {
   .display-heading h1 { font-size: clamp(56px, 9vh, 96px); line-height: 1.05; }
 }
+
+@media (min-width: 900px) {
+  .display-result h2 { font-size: clamp(30px, 4.6vh, 64px); }
+  .display-result-percent { font-size: clamp(48px, 7vh, 96px); }
+  .display-result-count, .display-result-index { font-size: clamp(14px, 2vh, 28px); }
+  .display-result-top { grid-template-columns: clamp(30px, 4vh, 56px) minmax(0, 1fr) auto; }
+  .display-meter { height: clamp(12px, 1.6vh, 22px); }
+  .display-result { grid-template-columns: clamp(100px, 17vh, 200px) minmax(0, 1fr); }
+  .display-heading h1 { font-size: clamp(56px, 8vh, 96px); }
+}
