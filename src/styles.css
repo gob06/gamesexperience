@@ -1071,7 +1071,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .display-join p.display-scan { margin: 12px 0 4px; color: #fff8f1; font-weight: 700; font-size: clamp(28px, 4.5vh, 60px); line-height: 1.1; text-align: center; letter-spacing: .02em; }
 
 @media (min-width: 1700px) and (min-height: 1000px) {
-  .display-heading h1 { font-size: 100px; line-height: 1.05; }
+  .display-heading h1 { font-size: 95px; line-height: 1.05; }
   .display-result h2 { font-size: 80px; line-height: 1.05; }
   .display-result-percent { font-size: 80px; }
   .display-result-percent small { font-size: 40px; }
