@@ -21,9 +21,31 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
   }, [joinToken])
 
   useEffect(() => {
-    if (!qrRef.current || !joinUrl) return
-    void QRCode.toCanvas(qrRef.current, joinUrl, { width: 720, margin: 2, errorCorrectionLevel: 'H', color: { dark: '#15151a', light: '#ffffff' } })
-  }, [joinUrl])
+    const canvas = qrRef.current
+    if (!canvas || !joinUrl) return
+    let active = true
+    const logoUrl = localStorage.getItem(`selfie-qr-logo:${sessionId}`)
+    void QRCode.toCanvas(canvas, joinUrl, { width: 720, margin: 2, errorCorrectionLevel: 'H', color: { dark: '#15151a', light: '#ffffff' } }).then(() => {
+      if (!active || !logoUrl) return
+      const logo = new Image()
+      logo.onload = () => {
+        if (!active) return
+        const context = canvas.getContext('2d')
+        if (!context) return
+        const boxSize = Math.round(canvas.width * 0.23)
+        const padding = Math.round(canvas.width * 0.025)
+        const innerSize = boxSize - padding * 2
+        const scale = Math.min(innerSize / logo.naturalWidth, innerSize / logo.naturalHeight)
+        const width = logo.naturalWidth * scale
+        const height = logo.naturalHeight * scale
+        context.fillStyle = '#ffffff'
+        context.fillRect((canvas.width - boxSize) / 2, (canvas.height - boxSize) / 2, boxSize, boxSize)
+        context.drawImage(logo, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height)
+      }
+      logo.src = logoUrl
+    })
+    return () => { active = false }
+  }, [joinUrl, sessionId])
 
   useEffect(() => {
     let active = true

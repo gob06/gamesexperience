@@ -70,6 +70,20 @@ export default function SelfieCam() {
       const result = await response.json() as SelfieSession & { error?: string }
       if (!response.ok || !result.id || !result.joinToken) throw new Error(result.error || 'Could not create a selfie session.')
       const url = await getSelfieJoinUrl(result.joinToken)
+      try {
+        if (qrLogoUrl) {
+          const blob = await (await fetch(qrLogoUrl)).blob()
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(String(reader.result))
+            reader.onerror = () => reject(reader.error)
+            reader.readAsDataURL(blob)
+          })
+          localStorage.setItem(`selfie-qr-logo:${result.id}`, dataUrl)
+        }
+      } catch {
+        // The live screen simply shows a plain QR if the logo can't be stored.
+      }
       setSession(result)
       setJoinUrl(url)
       setSubmissions([])
