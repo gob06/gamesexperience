@@ -281,7 +281,12 @@ export default function SelfieCam() {
                           <button className="button button-primary" type="button" onClick={() => void updateSubmission(submission, 'approve')} aria-label="Approve photo"><Check size={16} /> Approve</button>
                           <button className="icon-button selfie-reject-button" type="button" onClick={() => void updateSubmission(submission, 'reject')} aria-label="Reject and delete photo"><Trash2 size={16} /></button>
                         </div>
-                      ) : <button className="button button-secondary" type="button" onClick={() => void showFullscreen(submission)}><Maximize size={15} /> Show full screen</button>}
+                      ) : (
+                        <div className="selfie-submission-actions">
+                          <button className="button button-secondary" type="button" onClick={() => void showFullscreen(submission)}><Maximize size={15} /> Show full screen</button>
+                          <button className="icon-button selfie-reject-button" type="button" onClick={() => { if (window.confirm('Remove this photo from the live screen? It will be deleted.')) void updateSubmission(submission, 'reject') }} aria-label="Delete approved photo"><Trash2 size={16} /></button>
+                        </div>
+                      )}
                     </article>
                   ))}
                 </div>
