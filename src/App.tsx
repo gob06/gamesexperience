@@ -1081,9 +1081,8 @@ function VotePage({ pollId }: { pollId: string }) {
   const totalVotes = poll?.options.reduce((total, option) => total + option.votes, 0) ?? 0
 
   return (
-    <div className="vote-shell">
+    <div className="vote-shell vote-shell-centered">
       {showAd && <AdVideoOverlay kind="poll" onDone={() => setShowAd(false)} />}
-      <header className="vote-topbar"><ThemeBrand /><span className="vote-top-label">A QUICK ROOM POLL</span></header>
       <main className="vote-main">
         {loading ? <div className="vote-card"><div className="skeleton-line" /><div className="skeleton-line short" /></div> : error && !poll ? (
           <div className="vote-card not-found"><div className="empty-icon"><CircleHelp size={21} /></div><h1>Poll not found.</h1><p>{error}</p><p>Check the QR code and try again.</p></div>
@@ -1110,7 +1109,6 @@ function VotePage({ pollId }: { pollId: string }) {
             {error && <p className="form-error" role="alert">{error}</p>}
             {sessionReady && !voted && poll.votingEnabled && <button className="button button-primary submit-vote" onClick={() => void castVote()} disabled={!selected}>Cast my vote <ArrowUpRight size={17} /></button>}
             {voted && <div className="vote-confirmation" role="status"><Check size={16} /> Vote recorded · one vote per session</div>}
-            <div className="vote-card-foot"><span>VOTE <span className="footer-dot">/</span> EVERY VOICE COUNTS</span></div>
           </section>
         ) : null}
       </main>
