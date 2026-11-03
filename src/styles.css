@@ -1100,3 +1100,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 
 .vote-card .submit-vote { display: flex; width: auto; min-width: 220px; margin: 20px auto 0; justify-content: center; }
 .vote-card { padding-bottom: 32px; }
+
+@media (min-width: 900px) {
+  .display-grid { gap: 14px; grid-template-columns: minmax(0, 1fr) calc(max(380px, 36vw) + clamp(30px, 5vw, 76px) - 14px); }
+}
