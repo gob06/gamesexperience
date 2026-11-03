@@ -1156,11 +1156,6 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
 
   return (
     <main className="display-shell">
-      <header className="display-topbar">
-        <ThemeBrand />
-        <div className="display-live"><span className="live-indicator" /> {poll.isQa ? 'LIVE Q&A' : 'LIVE RESULTS'} <span className="display-live-divider">/</span> UPDATES EVERY 2 SEC</div>
-        <a className="display-exit" href="/">Exit display <ArrowUpRight size={15} /></a>
-      </header>
       <section className="display-heading">
         <div>
           <div className="display-kicker">{poll.isQa ? 'Q&A' : 'AUDIENCE POLL'} <span>/</span> {poll.isQa ? 'FIRST CORRECT ANSWER' : 'LIVE SCOREBOARD'}</div>
