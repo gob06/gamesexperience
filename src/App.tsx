@@ -1158,8 +1158,7 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
     <main className="display-shell">
       <section className="display-heading">
         <div>
-          <div className="display-kicker">{poll.isQa ? 'Q&A' : 'AUDIENCE POLL'} <span>/</span> {poll.isQa ? 'FIRST CORRECT ANSWER' : 'LIVE SCOREBOARD'}</div>
-          {poll.questionImageUrl && <img className="question-image display-question-image" src={poll.questionImageUrl} alt={poll.question || 'Question'} />}
+          {poll.questionImageUrl &&  <img className="question-image display-question-image" src={poll.questionImageUrl} alt={poll.question || 'Question'} />}
           {(poll.question || !poll.questionImageUrl) && <h1>{poll.question}</h1>}
         </div>
         {!poll.isQa && <div className="display-total"><strong>{totalVotes.toLocaleString()}</strong><span>VOTES CAST</span></div>}
@@ -1180,7 +1179,6 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
             </article>
           ) : (
             <>
-              <div className="display-results-heading"><span>THE ROOM HAS SPOKEN</span><span>{poll.options.length} OPTIONS</span></div>
               {poll.options.map((option, index) => {
                 const percent = totalVotes ? Math.round(option.votes / totalVotes * 100) : 0
                 return (
@@ -1197,7 +1195,6 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
                 )
               })}
               {leader && <div className="display-leader"><span className="leader-star">★</span><span>IN THE LEAD</span><strong>{leader.label}</strong></div>}
-              {!totalVotes && <div className="display-waiting">Waiting for the first vote</div>}
             </>
           )}
         </div>
@@ -1207,11 +1204,6 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
           <p>{poll.isQa ? 'Point your phone camera at the code to enter your answer.' : 'Point your phone camera at the code to cast your vote.'}</p>
         </aside>
       </section>
-      <footer className="display-footer">
-        <span>{poll.isQa ? 'Q&A' : 'VOTE'} <i>/</i> EVERY VOICE COUNTS</span>
-        <a href={`/poll/${poll.id}`}>{poll.isQa ? 'Open Q&A page' : 'Open voting page'} <ArrowUpRight size={14} /></a>
-        <button className="display-fullscreen" onClick={() => { if (!document.fullscreenElement) void document.documentElement.requestFullscreen(); else void document.exitFullscreen() }}><Maximize size={16} /> Full screen</button>
-      </footer>
     </main>
   )
 }
