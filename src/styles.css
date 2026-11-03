@@ -991,9 +991,9 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 
 /* Live results: large QR and framed question / votes cast */
 @media (min-width: 900px) {
-  .display-grid { grid-template-columns: minmax(0, 1fr) minmax(380px, 36vw); }
-  .display-join { padding: 28px; }
-  .display-qr { width: min(100%, 460px); height: auto; aspect-ratio: 1; border-width: 14px; }
+  .display-grid { grid-template-columns: minmax(0, 1fr) minmax(300px, 28vw); }
+  .display-join { padding: 24px; }
+  .display-qr { width: min(100%, 320px); height: auto; aspect-ratio: 1; border-width: 10px; }
   .display-qr canvas { width: 100% !important; height: 100% !important; }
 }
 .display-heading { gap: 20px; border-bottom: 0; }
