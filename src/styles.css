@@ -1053,3 +1053,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
   .display-result h2 { font-size: 28px; line-height: 1.1; }
   .display-result-percent { font-size: 46px; }
 }
+
+@media (min-width: 900px) {
+  .display-heading h1 { font-size: clamp(56px, 9vh, 96px); line-height: 1.05; }
+}
