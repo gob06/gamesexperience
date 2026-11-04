@@ -3,6 +3,7 @@ import QRCode from 'qrcode'
 import { ArrowLeft, ArrowUpRight, Check, Copy, ImagePlus, LogOut, MonitorPlay, Play, QrCode, Shuffle, Square, Ticket, Trash2, Trophy, X } from 'lucide-react'
 import { ThemeBrand, useTheme } from './theme'
 import { AdVideoOverlay } from './AdVideo'
+import { TermsNotice } from './terms'
 
 type Raffle = {
   id: string
@@ -283,6 +284,7 @@ export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
                 <input id="raffle-ticket-number" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder="Enter your ticket number" required />
                 {error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
                 <button className="button button-primary raffle-submit" type="submit" disabled={busy}>{busy ? 'Registering…' : 'Register ticket'} <Ticket size={17} /></button>
+                <TermsNotice />
               </form>
             ) : (
               <div className="raffle-notice" role="status">Registration is closed while the host is drawing.</div>
