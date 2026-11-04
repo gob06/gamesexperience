@@ -496,7 +496,6 @@ export function SelfieParticipant({ token }: { token: string }) {
   return (
     <main className="selfie-shell">
       {showAd && <AdVideoOverlay kind="selfie" onDone={() => setShowAd(false)} />}
-      <header className="selfie-topbar"><ThemeBrand /><a className="game-back-link" href="/"><ArrowLeft size={16} /> Back</a></header>
       <div className="selfie-content">
         {bannerOk ? (
           <section className="selfie-guest-banner"><img src={`/api/selfie/join/${encodeURIComponent(token)}/banner`} alt="" onError={() => setBannerOk(false)} /></section>
