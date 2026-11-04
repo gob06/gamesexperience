@@ -1660,3 +1660,98 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 @media (prefers-reduced-motion: reduce) {
   .display-shell::before, .display-shell::after, .display-shell .display-result, .display-shell .display-question-second-line { animation: none !important; }
 }
+
+/* Selfie live screen: same broadcast look as the live results page. */
+.selfie-display,
+.theme-root .selfie-display {
+  position: relative;
+  isolation: isolate;
+  color: #f5f6fa;
+  background-color: #050b35;
+  background-image:
+    radial-gradient(ellipse at 58% 42%, rgba(0, 107, 255, .24), transparent 54%),
+    radial-gradient(circle, rgba(0, 217, 255, .16) 0 1px, transparent 1.8px),
+    repeating-linear-gradient(132deg, transparent 0 78px, rgba(0, 217, 255, .045) 79px 80px, transparent 81px 156px),
+    linear-gradient(125deg, #050b35 0%, #071d68 50%, #050b35 100%);
+  background-size: auto, 13px 13px, auto, auto;
+  background-repeat: repeat;
+  background-position: 0 0;
+  gap: clamp(16px, 2.2vw, 36px);
+  padding: clamp(16px, 2.2vw, 40px);
+}
+.selfie-display::before,
+.selfie-display::after {
+  position: fixed;
+  z-index: 0;
+  width: 48vw;
+  height: 28vw;
+  border-radius: 50%;
+  background: linear-gradient(118deg, transparent 18%, #777e8d 31%, #f5f6fa 39%, #c7cbd4 46%, #777e8d 55%, transparent 70%);
+  content: '';
+  filter: drop-shadow(0 0 12px rgba(0, 217, 255, .25));
+  pointer-events: none;
+  -webkit-mask: radial-gradient(ellipse, transparent 53%, #000 55% 60%, transparent 62%);
+  mask: radial-gradient(ellipse, transparent 53%, #000 55% 60%, transparent 62%);
+}
+.selfie-display::before { top: -19vw; left: -20vw; transform: rotate(-24deg); }
+.selfie-display::after { right: -22vw; bottom: -19vw; transform: rotate(154deg); }
+.selfie-display > * { position: relative; z-index: 1; }
+
+.selfie-display .selfie-display-wall {
+  border: 2px solid #00d9ff;
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(7, 29, 104, .94), rgba(5, 11, 53, .98));
+  box-shadow: 0 0 12px rgba(0, 217, 255, .42), inset 0 0 22px rgba(0, 107, 255, .22);
+}
+.selfie-display .selfie-slide { background: #050b35; }
+.selfie-display .selfie-display-empty { color: #c7cbd4; font-family: 'Aptos Display', 'Arial Narrow', sans-serif; font-style: italic; font-weight: 900; text-transform: uppercase; text-shadow: 0 0 16px rgba(0, 107, 255, .68); }
+
+.selfie-display .selfie-display-qr {
+  align-self: stretch;
+  justify-content: center;
+  gap: clamp(16px, 2vh, 26px);
+  padding: clamp(18px, 2.5vw, 40px);
+  border: 2px solid #00d9ff;
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(7, 29, 104, .94), rgba(5, 11, 53, .98));
+  box-shadow: 0 0 12px rgba(0, 217, 255, .42), inset 0 0 22px rgba(0, 107, 255, .22);
+}
+.selfie-display .selfie-qr-frame {
+  --qr-size: min(480px, 36vw, 58vh);
+  display: grid;
+  width: var(--qr-size);
+  aspect-ratio: 1;
+  place-items: center;
+  padding: 12px;
+  border: 10px solid #050b35;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 0 0 2px #c7cbd4, 0 0 24px rgba(0, 217, 255, .66);
+}
+.selfie-display .selfie-display-qr canvas { display: block; width: 100% !important; height: 100% !important; max-height: none; border-radius: 0; }
+.selfie-display .selfie-display-qr p {
+  display: flex;
+  width: var(--qr-size, min(480px, 36vw, 58vh));
+  min-height: 64px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid #fff;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f5f6fa 0%, #c7cbd4 20%, #777e8d 45%, #f5f6fa 58%, #c7cbd4 76%, #777e8d 100%);
+  box-shadow: inset 0 2px 0 #fff, 0 0 18px rgba(0, 217, 255, .35);
+  color: #050b35;
+  font-family: 'Aptos Display', 'Arial Narrow', sans-serif;
+  font-size: clamp(18px, 2.6vh, 36px);
+  font-style: italic;
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: 0;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .55);
+}
+.selfie-display .selfie-display-qr p svg { width: 1.05em; height: 1.05em; flex: 0 0 auto; stroke-width: 2.6; }
+.selfie-display .selfie-qr-frame { flex: 0 0 auto; height: var(--qr-size); }
+.selfie-display .selfie-display-qr canvas { height: 100% !important; }

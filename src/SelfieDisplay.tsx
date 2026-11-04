@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
+import { Smartphone } from 'lucide-react'
 import { getSelfieJoinUrl } from './SelfieCam'
 
 type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string; approvedAt?: string | null }
@@ -27,14 +28,14 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
     if (!canvas || !joinUrl) return
     let active = true
     const logoUrl = localStorage.getItem(`selfie-qr-logo:${sessionId}`)
-    void QRCode.toCanvas(canvas, joinUrl, { width: 720, margin: 2, errorCorrectionLevel: 'H', color: { dark: '#15151a', light: '#ffffff' } }).then(() => {
+    void QRCode.toCanvas(canvas, joinUrl, { width: 480, margin: 2, errorCorrectionLevel: 'H', color: { dark: '#15151a', light: '#ffffff' } }).then(() => {
       if (!active || !logoUrl) return
       const logo = new Image()
       logo.onload = () => {
         if (!active) return
         const context = canvas.getContext('2d')
         if (!context) return
-        const boxSize = Math.round(canvas.width * 0.23)
+        const boxSize = 200
         const padding = Math.round(canvas.width * 0.025)
         const innerSize = boxSize - padding * 2
         const scale = Math.min(innerSize / logo.naturalWidth, innerSize / logo.naturalHeight)
@@ -136,8 +137,8 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
         )}
       </section>
       <aside className="selfie-display-qr">
-        <canvas ref={qrRef} aria-label="Scan to share your selfie" />
-        <p>SCAN TO SHARE YOUR SELFIE!</p>
+        <div className="selfie-qr-frame"><canvas ref={qrRef} aria-label="Scan to share your selfie" /></div>
+        <p><Smartphone aria-hidden="true" />SCAN TO SHARE YOUR SELFIE!</p>
       </aside>
     </main>
   )
