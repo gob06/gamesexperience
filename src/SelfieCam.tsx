@@ -522,7 +522,7 @@ export function SelfieParticipant({ token }: { token: string }) {
               <button className="selfie-retake-link" type="button" onClick={() => void startCamera()}><Camera size={14} /> Take a new photo</button>
             </>
           ) : (
-            <div className="selfie-empty"><span className="selfie-empty-icon"><Camera size={26} /></span><h2>Ready for your close-up?</h2><p>Use your front camera or choose a JPEG, PNG, or WebP photo up to 5 MB.</p><div className="selfie-controls"><button className="button button-primary" type="button" onClick={() => void startCamera()}><Camera size={16} /> Open camera</button><button className="button button-secondary" type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={16} /> Choose a photo</button></div></div>
+            <div className="selfie-empty"><span className="selfie-empty-icon"><Camera size={26} /></span><h2>Share your picture and get on the big screen.</h2><div className="selfie-controls"><button className="button button-primary" type="button" onClick={() => void startCamera()}><Camera size={16} /> Open camera</button><button className="button button-secondary" type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={16} /> Choose a photo</button></div></div>
           )}
           {error && <p className="selfie-error" role="alert">{error}</p>}
         </section>
