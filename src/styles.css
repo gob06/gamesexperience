@@ -1126,3 +1126,6 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 
 .selfie-guest-banner { display: flex; justify-content: center; margin: 0 0 18px; }
 .selfie-guest-banner img { display: block; width: 100%; max-height: 38vh; object-fit: cover; border-radius: 16px; }
+
+.selfie-session-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.selfie-paused-note { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255, 190, 70, 0.55); background: rgba(255, 190, 70, 0.14); color: #ffd58a; font-weight: 700; }

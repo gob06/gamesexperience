@@ -10,6 +10,7 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
   const [photos, setPhotos] = useState<Submission[]>([])
   const [index, setIndex] = useState(0)
   const [closed, setClosed] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -58,6 +59,7 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
         if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load photos.')
         setPhotos(result.submissions.filter((submission) => submission.status === 'approved'))
         setClosed(Boolean(result.closed))
+        setPaused(Boolean((result as { paused?: boolean }).paused))
         setError('')
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : 'Could not load photos.')
@@ -95,10 +97,10 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
   const current = slides.length ? slides[index % slides.length] : null
 
   useEffect(() => {
-    if (slides.length < 2) return
+    if (slides.length < 2 || paused) return
     const timer = window.setInterval(() => setIndex((value) => value + 1), 5000)
     return () => window.clearInterval(timer)
-  }, [slides.length])
+  }, [slides.length, paused])
 
   return (
     <main className="selfie-display">

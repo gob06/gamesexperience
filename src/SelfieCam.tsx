@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import QRCode from 'qrcode'
-import { ArrowLeft, Camera, Check, ImagePlus, Maximize, Minimize, QrCode, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Camera, Check, ImagePlus, Maximize, Minimize, Pause, Play, QrCode, Trash2, Upload, X } from 'lucide-react'
 import { ThemeBrand } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
@@ -36,7 +36,24 @@ export default function SelfieCam() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [paused, setPaused] = useState(false)
 
+  async function togglePause() {
+    if (!session) return
+    const next = !paused
+    setPaused(next)
+    try {
+      const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(session.id)}/pause`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused: next }),
+      })
+      if (!response.ok) throw new Error('Could not change the pause state.')
+    } catch (caught) {
+      setPaused(!next)
+      setError(caught instanceof Error ? caught.message : 'Could not change the pause state.')
+    }
+  }
   function chooseQrLogo(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0]
     event.currentTarget.value = ''
@@ -133,6 +150,7 @@ export default function SelfieCam() {
       const result = await response.json() as { submissions?: SelfieSubmission[]; closed?: boolean; error?: string }
       if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load selfie submissions.')
       setSubmissions(result.submissions)
+      setPaused(Boolean((result as { paused?: boolean }).paused))
       if (result.closed) {
         setNotice('This selfie session has ended.')
         setSession(null)
@@ -300,7 +318,8 @@ export default function SelfieCam() {
             </div>
           ) : (
             <div className="selfie-host-session">
-              <div className="selfie-session-heading"><div><span className="selfie-session-label">GUEST UPLOAD QR</span><h2>Scan to submit a selfie</h2></div><button className="button button-quiet selfie-end-button" type="button" onClick={() => void endSession()}><X size={15} /> End session</button></div>
+              <div className="selfie-session-heading"><div><span className="selfie-session-label">GUEST UPLOAD QR</span><h2>Scan to submit a selfie</h2></div><div className="selfie-session-buttons"><button className="button button-secondary" type="button" onClick={() => void togglePause()}>{paused ? <Play size={15} /> : <Pause size={15} />} {paused ? 'Resume session' : 'Pause session'}</button><button className="button button-quiet selfie-end-button" type="button" onClick={() => void endSession()}><X size={15} /> End session</button></div></div>
+              {paused && <p className="selfie-paused-note">Session paused — guests can't upload and the live screen is holding its current photo.</p>}
               <div className="selfie-session-share">
                 <div className="selfie-qr-frame"><canvas ref={qrCanvasRef} aria-label="Scan this QR code to submit a selfie" /></div>
                 <p>Scan with a phone camera. Photos must be approved before they appear on screen.</p>
@@ -357,6 +376,22 @@ export function SelfieParticipant({ token }: { token: string }) {
   const [submitted, setSubmitted] = useState(false)
   const [showAd, setShowAd] = useState(false)
   const [bannerOk, setBannerOk] = useState(true)
+  const [uploadsPaused, setUploadsPaused] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    async function check() {
+      try {
+        const response = await fetch(`/api/selfie/join/${encodeURIComponent(token)}/status`, { cache: 'no-store' })
+        if (!response.ok) return
+        const result = await response.json() as { paused?: boolean }
+        if (active) setUploadsPaused(Boolean(result.paused))
+      } catch { /* Keep the last known state. */ }
+    }
+    void check()
+    const timer = window.setInterval(() => void check(), 3000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [token])
   const [error, setError] = useState('')
 
   function stopCamera() {
@@ -468,6 +503,7 @@ export function SelfieParticipant({ token }: { token: string }) {
           <section className="selfie-heading"><span className="activity-eyebrow"><Camera size={15} /> SELFIE CAM</span><h1>Share your moment.</h1><p>Your photo goes to the host for review and will only appear on the big screen if approved.</p></section>
         )}
         <section className="selfie-panel">
+          {uploadsPaused && <p className="selfie-paused-note">The host has paused uploads for now. Please wait a moment.</p>}
           <input ref={fileInputRef} className="selfie-file-input" type="file" accept="image/jpeg,image/png,image/webp" capture="user" onChange={(event) => {
             const file = event.currentTarget.files?.[0]
             event.currentTarget.value = ''
@@ -480,7 +516,7 @@ export function SelfieParticipant({ token }: { token: string }) {
               <div className="selfie-photo-preview"><img src={previewUrl} alt="Your photo preview" /></div>
               <div className="selfie-controls">
                 <button className="button button-secondary" type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={16} /> Choose another</button>
-                <button className="button button-primary" type="button" onClick={() => void submitPhoto()} disabled={submitting || submitted}><Upload size={16} /> {submitted ? 'Sent for host approval' : submitting ? 'Sending…' : 'Send to host'}</button>
+                <button className="button button-primary" type="button" onClick={() => void submitPhoto()} disabled={submitting || submitted || uploadsPaused}><Upload size={16} /> {submitted ? 'Sent for host approval' : uploadsPaused ? 'Uploads paused' : submitting ? 'Sending…' : 'Send to host'}</button>
               </div>
               {submitted && <p className="selfie-notice">Your photo was sent. The host will review it before displaying it.</p>}
               <button className="selfie-retake-link" type="button" onClick={() => void startCamera()}><Camera size={14} /> Take a new photo</button>

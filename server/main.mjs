@@ -923,11 +923,29 @@ app.get('/api/admin/theme/audit', requireAdmin, async (_request, response) => {
 
 function getSelfieSessionForOwner(sessionId, userId) {
   return database.prepare(`
-    SELECT id, expires_at AS expiresAt, closed_at AS closedAt
+    SELECT id, expires_at AS expiresAt, closed_at AS closedAt, paused
     FROM selfie_sessions
     WHERE id = ? AND owner_user_id = ?
   `).get(sessionId, userId)
 }
+
+app.post('/api/selfie/sessions/:id/pause', requireUser, async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
+  if (!session || session.closedAt || Date.parse(session.expiresAt) <= Date.now()) {
+    return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
+  }
+  const paused = request.body?.paused === true ? 1 : 0
+  await database.prepare('UPDATE selfie_sessions SET paused = ? WHERE id = ?').run(paused, session.id)
+  response.json({ paused: Boolean(paused) })
+})
+
+app.get('/api/selfie/join/:token/status', async (request, response) => {
+  const token = request.params.token
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).end()
+  const row = await database.prepare('SELECT paused, expires_at AS expiresAt, closed_at AS closedAt FROM selfie_sessions WHERE join_token_hash = ?').get(hashSessionToken(token))
+  if (!row || row.closedAt || Date.parse(row.expiresAt) <= Date.now()) return response.status(404).end()
+  response.set('Cache-Control', 'no-store').json({ paused: Boolean(row.paused) })
+})
 
 app.post('/api/selfie/sessions', requireUser, async (request, response) => {
   const now = new Date()
@@ -968,13 +986,14 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request,
   const token = request.params.token
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).json({ error: 'This selfie session is invalid or has expired.' })
   const session = await database.prepare(`
-    SELECT id, expires_at AS expiresAt, closed_at AS closedAt
+    SELECT id, expires_at AS expiresAt, closed_at AS closedAt, paused
     FROM selfie_sessions
     WHERE join_token_hash = ?
   `).get(hashSessionToken(token))
   if (!session || session.closedAt || Date.parse(session.expiresAt) <= Date.now()) {
     return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
   }
+  if (session.paused) return response.status(423).json({ error: 'The host has paused photo uploads. Please try again shortly.' })
   const { file } = request
   if (!file) return response.status(400).json({ error: 'Choose or take a photo to submit.' })
   if (!hasValidImageSignature(file.mimetype, file.buffer)) {
@@ -987,9 +1006,10 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request,
   const id = randomUUID()
   const submitted = await inTransaction(async () => {
     const currentSession = await database.prepare(`
-      SELECT id, expires_at AS expiresAt, closed_at AS closedAt FROM selfie_sessions WHERE id = ?
+      SELECT id, expires_at AS expiresAt, closed_at AS closedAt, paused FROM selfie_sessions WHERE id = ?
     `).get(session.id)
     if (!currentSession || currentSession.closedAt || Date.parse(currentSession.expiresAt) <= Date.now()) return 'closed'
+    if (currentSession.paused) return 'paused'
     const submissionCount = (await database.prepare('SELECT count(*) AS count FROM selfie_submissions WHERE session_id = ?').get(session.id)).count
     if (submissionCount >= 100) return 'limit'
     await database.prepare(`
@@ -999,6 +1019,7 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request,
     return 'created'
   })
   if (submitted === 'closed') return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
+  if (submitted === 'paused') return response.status(423).json({ error: 'The host has paused photo uploads. Please try again shortly.' })
   if (submitted === 'limit') return response.status(429).json({ error: 'This selfie session has reached its submission limit.' })
   response.status(201).json({ id, status: 'pending' })
 })
@@ -1010,7 +1031,7 @@ app.get('/api/selfie/sessions/:id/submissions', requireUser, async (request, res
     SELECT id, file_name AS fileName, status, created_at AS createdAt, approved_at AS approvedAt
     FROM selfie_submissions WHERE session_id = ? ORDER BY created_at DESC
   `).all(session.id)
-  response.json({ submissions, expiresAt: session.expiresAt, closed: Boolean(session.closedAt) || Date.parse(session.expiresAt) <= Date.now() })
+  response.json({ submissions, paused: Boolean(session.paused), expiresAt: session.expiresAt, closed: Boolean(session.closedAt) || Date.parse(session.expiresAt) <= Date.now() })
 })
 
 app.post('/api/selfie/sessions/:sessionId/submissions/:submissionId/approve', requireUser, async (request, response) => {
