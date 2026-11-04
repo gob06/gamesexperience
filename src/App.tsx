@@ -559,7 +559,7 @@ function App() {
                               <SavedLogoPicker onSelect={(logo) => void useSavedLogo(logo)} />
               <div className="field-row-label">
                 <span className="field-label">{isQaMode ? 'Answer options · select the correct answer' : 'Answer options'}</span>
-                <span className="field-hint">2 minimum · 8 maximum</span>
+                <span className="field-hint">2 minimum · 10 maximum</span>
               </div>
               <div className="option-list">
                 {options.map((option, index) => (
@@ -606,7 +606,7 @@ function App() {
                   </div>
                 ))}
               </div>
-              {options.length < 8 && <button className="add-option" type="button" onClick={() => setOptions((current) => [...current, { label: '', imageFile: null, previewUrl: '', contentMode: 'text' }])}><Plus size={15} /> Add an option</button>}
+              {options.length < 10 && <button className="add-option" type="button" onClick={() => setOptions((current) => [...current, { label: '', imageFile: null, previewUrl: '', contentMode: 'text' }])}><Plus size={15} /> Add an option</button>}
               {isQaMode && <label className="reveal-correct-choice"><input type="checkbox" checked={revealCorrect} onChange={(event) => setRevealCorrect(event.target.checked)} /> Show the correct answer to participants who answer wrong</label>}
               {error && <p className="form-error" role="alert">{error}</p>}
               <button className="button button-primary create-button" type="submit" disabled={loading}>

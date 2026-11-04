@@ -1191,7 +1191,7 @@ app.post('/api/polls/:id/session', rateLimit({ windowMs: 60_000, max: Number(pro
   response.set('Cache-Control', 'no-store').json({ authenticated: true, voted: false, expiresAt, ...(sessionPoll.isQa ? { qa: await qa.describeSession(sessionPoll, votingSessionId) } : {}) })
 })
 
-app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'optionImages', maxCount: 8 }, { name: 'questionImage', maxCount: 1 }]), async (request, response) => {
+app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'optionImages', maxCount: 10 }, { name: 'questionImage', maxCount: 1 }]), async (request, response) => {
   const question = typeof request.body.question === 'string' ? request.body.question.trim() : ''
   const isQa = request.body.isQa === 'true'
   let parsedOptions
@@ -1209,7 +1209,7 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
         imageIndex: option.imageIndex === null ? null : Number.isInteger(option.imageIndex) ? option.imageIndex : -1,
         isCorrect: option.isCorrect === true,
       }
-    }).filter((option) => option.label || option.imageIndex !== null).slice(0, 8)
+    }).filter((option) => option.label || option.imageIndex !== null).slice(0, 10)
     : []
   const optionFiles = request.files?.optionImages || []
   const logoFile = request.files?.logo?.[0]
