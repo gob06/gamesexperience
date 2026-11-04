@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties } from 'react'
 import QRCode from 'qrcode'
 import {
   ArrowUpRight,
@@ -21,13 +21,15 @@ import {
   Plus,
   QrCode,
   Shield,
+  Smartphone,
+  Ticket,
   Trash2,
   UserPlus,
   Users,
   X,
 } from 'lucide-react'
 import ThemeSettings from './ThemeSettings'
-import { AdVideoOverlay, AdVideoSettings } from './AdVideo'
+import { AdVideoOverlay, AdVideoSettings, hasAudienceThankYouCompleted, ThankYouScreen } from './AdVideo'
 import { TermsNotice, TermsSettings } from './terms'
 import QaAudience from './QaAudience'
 import QaMonitor from './QaMonitor'
@@ -38,11 +40,19 @@ import SelfieCam, { SelfieParticipant } from './SelfieCam'
 import SelfieDisplay from './SelfieDisplay'
 import { ThemeBrand } from './theme'
 import VanishingGame from './VanishingGame'
+import { RaffleDisplayPage, RaffleHostPage, RaffleJoinPage } from './Raffle'
 
 type PollOption = { id: string; label: string; votes: number; imageUrl?: string | null }
 type Poll = { id: string; question: string; joinTitle?: string | null; questionImageUrl?: string | null; options: PollOption[]; createdAt: string; logoUrl?: string | null; isQa: boolean; winnerName?: string; winnerTicketNumber?: string; winnerAnswer?: string; votingEnabled: boolean; videoEnabled: boolean; revealCorrect?: boolean; correctOptionId?: string | null; stats?: { participants: number; submissions: number; winners: number; nonWinners: number } }
 type AuthUser = { id: string; username: string; role: 'admin' | 'host' }
-type OptionDraft = { label: string; imageFile: File | null; previewUrl: string }
+type OptionContentMode = 'text' | 'text-image' | 'image'
+type OptionDraft = { label: string; imageFile: File | null; previewUrl: string; contentMode: OptionContentMode }
+
+function resultOptionColor(index: number, optionCount: number) {
+  const hue = (14 + index * 360 / Math.max(optionCount, 1)) % 360
+  return `hsl(${hue} 74% 44%)`
+}
+
 type GameRoomSummary = {
   id: string
   roomName: string
@@ -54,9 +64,17 @@ type GameRoomSummary = {
 
 function emptyOptionDrafts(): OptionDraft[] {
   return [
-    { label: '', imageFile: null, previewUrl: '' },
-    { label: '', imageFile: null, previewUrl: '' },
+    { label: '', imageFile: null, previewUrl: '', contentMode: 'text' },
+    { label: '', imageFile: null, previewUrl: '', contentMode: 'text' },
   ]
+}
+
+function isOptionComplete(option: OptionDraft) {
+  const hasLabel = Boolean(option.label.trim())
+  const hasImage = Boolean(option.imageFile)
+  if (option.contentMode === 'image') return hasImage
+  if (option.contentMode === 'text-image') return hasLabel && hasImage
+  return hasLabel
 }
 
 const pollPath = window.location.pathname.match(/^\/poll\/([^/]+)\/?$/)
@@ -66,6 +84,8 @@ const gamePath = window.location.pathname.match(/^\/game(?:\/([^/]+))?\/?$/)
 const selfiePath = /^\/selfie\/?$/.test(window.location.pathname)
 const selfieJoinPath = window.location.pathname.match(/^\/selfie\/join\/([A-Za-z0-9_-]+)\/?$/)
 const selfieDisplayPath = window.location.pathname.match(/^\/selfie\/display\/([A-Za-z0-9_-]+)\/?$/)
+const raffleJoinPath = window.location.pathname.match(/^\/raffle\/join\/([^/]+)\/?$/)
+const raffleDisplayPath = window.location.pathname.match(/^\/raffle\/([^/]+)\/display\/?$/)
 
 async function requestPolls(): Promise<Poll[]> {
   const response = await fetch('/api/polls')
@@ -73,7 +93,7 @@ async function requestPolls(): Promise<Poll[]> {
   return response.json()
 }
 
-async function drawQr(canvas: HTMLCanvasElement, value: string, logoUrl: string | null | undefined, size: number, isActive: () => boolean = () => true) {
+async function drawQr(canvas: HTMLCanvasElement, value: string, logoUrl: string | null | undefined, size: number, isActive: () => boolean = () => true, logoSize?: number) {
   await QRCode.toCanvas(canvas, value, {
     width: size,
     margin: 2,
@@ -89,7 +109,7 @@ async function drawQr(canvas: HTMLCanvasElement, value: string, logoUrl: string 
   })
   const context = canvas.getContext('2d')
   if (!context || !logo.naturalWidth || !isActive()) return
-  const boxSize = Math.round(size * 0.22)
+  const boxSize = Math.min(logoSize ?? Math.round(size * 0.22), size)
   const padding = Math.round(size * 0.025)
   const innerSize = boxSize - padding * 2
   const scale = Math.min(innerSize / logo.naturalWidth, innerSize / logo.naturalHeight)
@@ -111,16 +131,16 @@ async function downloadQrPng(value: string, logoUrl: string | null | undefined, 
   link.click()
 }
 
-function PollQrCode({ value, logoUrl, size, label }: { value: string; logoUrl?: string | null; size: number; label: string }) {
+function PollQrCode({ value, logoUrl, size, logoSize, label }: { value: string; logoUrl?: string | null; size: number; logoSize?: number; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !value) return
     let active = true
-    void drawQr(canvas, value, logoUrl, size, () => active)
+    void drawQr(canvas, value, logoUrl, size, () => active, logoSize)
     return () => { active = false }
-  }, [value, logoUrl, size])
+  }, [value, logoUrl, size, logoSize])
 
   return <canvas ref={canvasRef} aria-label={label} />
 }
@@ -165,6 +185,7 @@ async function getGameShareUrl(roomId: string) {
 
 function App() {
   const isQaMode = new URLSearchParams(window.location.search).get('mode') === 'qa'
+  const [audienceThankYou, setAudienceThankYou] = useState(hasAudienceThankYouCompleted)
   const [polls, setPolls] = useState<Poll[]>([])
   const [question, setQuestion] = useState('')
   const [options, setOptions] = useState<OptionDraft[]>(emptyOptionDrafts)
@@ -187,6 +208,12 @@ function App() {
   const [authError, setAuthError] = useState('')
   const logoInputRef = useRef<HTMLInputElement>(null)
   const optionImageInputRefs = useRef<Array<HTMLInputElement | null>>([])
+
+  useEffect(() => {
+    const showThankYou = () => setAudienceThankYou(true)
+    window.addEventListener('audience-thank-you-complete', showThankYou)
+    return () => window.removeEventListener('audience-thank-you-complete', showThankYou)
+  }, [])
 
   const visiblePolls = isQaMode ? polls.filter((poll) => poll.isQa) : polls.filter((poll) => !poll.isQa)
 
@@ -327,7 +354,7 @@ function App() {
 
   async function createPoll(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (isQaMode && (correctOptionIndex === null || !options[correctOptionIndex]?.label.trim())) {
+    if (isQaMode && (correctOptionIndex === null || !isOptionComplete(options[correctOptionIndex]))) {
       setError('Choose the correct answer before creating this Q&A.')
       return
     }
@@ -335,7 +362,19 @@ function App() {
       setError('Upload a question image, or switch to text only.')
       return
     }
-    const cleanOptions = options.map((option, index) => ({ ...option, label: option.label.trim(), isCorrect: isQaMode && index === correctOptionIndex })).filter((option) => option.label)
+    if (options.some((option) => option.contentMode !== 'text' && !isOptionComplete(option))) {
+      setError('Complete each image answer with the required text and image.')
+      return
+    }
+    const cleanOptions = options.map((option, index) => ({
+      ...option,
+      label: option.contentMode === 'image' ? '' : option.label.trim(),
+      isCorrect: isQaMode && index === correctOptionIndex,
+    })).filter(isOptionComplete)
+    if (cleanOptions.length < 2) {
+      setError('Add at least two complete answer options.')
+      return
+    }
     setError('')
     try {
       const formData = new FormData()
@@ -344,7 +383,7 @@ function App() {
       formData.append('revealCorrect', String(isQaMode && revealCorrect))
       const optionImages: File[] = []
       formData.append('options', JSON.stringify(cleanOptions.map((option) => {
-        const imageIndex = option.imageFile ? optionImages.push(option.imageFile) - 1 : null
+        const imageIndex = option.contentMode !== 'text' && option.imageFile ? optionImages.push(option.imageFile) - 1 : null
         return { label: option.label, imageIndex, isCorrect: option.isCorrect }
       })))
       optionImages.forEach((image) => formData.append('optionImages', image))
@@ -394,13 +433,14 @@ function App() {
   }
 
   async function deletePoll(poll: Poll) {
-    if (!window.confirm(`Delete "${poll.question || 'this Q&A'}"? All participants, answers, and results will be removed.`)) return
+    const pollType = poll.isQa ? 'Q&A' : 'poll'
+    if (!window.confirm(`Delete "${poll.question || `this ${pollType}`}"? All participants, answers, and results will be removed.`)) return
     try {
       const response = await fetch(`/api/polls/${encodeURIComponent(poll.id)}`, { method: 'DELETE' })
-      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not delete this Q&A.')
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `Could not delete this ${pollType}.`)
       setPolls((current) => current.filter((item) => item.id !== poll.id))
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not delete this Q&A.')
+      setError(caught instanceof Error ? caught.message : `Could not delete this ${pollType}.`)
     }
   }
 
@@ -409,14 +449,18 @@ function App() {
     setAuthUser(null)
   }
 
+  if (audienceThankYou) return <ThankYouScreen />
   if (resultsPath) return <ResultsDisplay pollId={decodeURIComponent(resultsPath[1])} />
   if (pollPath) return <PollEntry pollId={decodeURIComponent(pollPath[1])} />
   if (gamePath?.[1]) return <VanishingGame roomId={decodeURIComponent(gamePath[1])} />
   if (selfieJoinPath) return <SelfieParticipant token={selfieJoinPath[1]} />
+  if (raffleJoinPath) return <RaffleJoinPage raffleId={decodeURIComponent(raffleJoinPath[1])} />
+  if (raffleDisplayPath) return <RaffleDisplayPage raffleId={decodeURIComponent(raffleDisplayPath[1])} />
   if (authLoading) return <AuthLoading />
   if (setupRequired) return <LoginPage setupRequired onAuthenticated={handleAuthenticated} initialError={authError} />
   if (!authUser) return <LoginPage onAuthenticated={handleAuthenticated} initialError={authError} />
   if (monitorPath) return <QaMonitor pollId={decodeURIComponent(monitorPath[1])} isAdmin={authUser.role === 'admin'} />
+  if (window.location.pathname === '/raffle') return <RaffleHostPage user={authUser} onLogout={() => void logout()} />
   if (window.location.pathname === '/admin/theme') {
     return authUser.role === 'admin'
       ? <ThemeSettings onBack={() => window.location.assign('/')} />
@@ -521,19 +565,36 @@ function App() {
                 {options.map((option, index) => (
                   <div className="option-input-row" key={index}>
                     <span className={`option-marker marker-${index % 4}`}>{String.fromCharCode(65 + index)}</span>
-                    <input
+                    <select
+                      className="option-mode-select"
+                      aria-label={`Answer ${index + 1} format`}
+                      value={option.contentMode}
+                      onChange={(event) => setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? {
+                        ...item,
+                        contentMode: event.target.value as OptionContentMode,
+                        ...(event.target.value === 'image' ? { label: '' } : {}),
+                      } : item))}
+                    >
+                      <option value="text">Text</option>
+                      <option value="text-image">Text + image</option>
+                      <option value="image">Image only</option>
+                    </select>
+                    {option.contentMode !== 'image' && <input
                       aria-label={`Option ${index + 1}`}
                       value={option.label}
                       onChange={(event) => setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))}
                       placeholder={index === 0 ? 'First answer' : index === 1 ? 'Second answer' : `Option ${index + 1}`}
                       maxLength={80}
-                    />
+                      required={option.contentMode === 'text-image'}
+                    />}
                     {isQaMode && <label className="correct-answer-choice" title="Mark this as the correct answer"><input type="radio" name="correct-answer" checked={correctOptionIndex === index} onChange={() => setCorrectOptionIndex(index)} aria-label={`Mark option ${index + 1} as correct`} /><span>Correct</span></label>}
-                    <input ref={(element) => { optionImageInputRefs.current[index] = element }} className="option-image-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => selectOptionImage(index, event)} aria-label={`Choose an image for option ${index + 1}`} />
-                    <button className="option-image-picker" type="button" onClick={() => optionImageInputRefs.current[index]?.click()} aria-label={`${option.imageFile ? 'Change' : 'Add'} image for option ${index + 1}`} title={option.imageFile ? 'Change option image' : 'Add option image'}>
-                      {option.previewUrl ? <img src={option.previewUrl} alt="" /> : <ImagePlus size={17} />}
-                    </button>
-                    {option.imageFile && <button className="icon-button option-image-remove" type="button" onClick={() => removeOptionImage(index)} aria-label={`Remove image from option ${index + 1}`} title="Remove image"><X size={15} /></button>}
+                    {option.contentMode !== 'text' && <>
+                      <input ref={(element) => { optionImageInputRefs.current[index] = element }} className="option-image-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => selectOptionImage(index, event)} aria-label={`Choose an image for option ${index + 1}`} />
+                      <button className="option-image-picker" type="button" onClick={() => optionImageInputRefs.current[index]?.click()} aria-label={`${option.imageFile ? 'Change' : 'Add'} image for option ${index + 1}`} title={option.imageFile ? 'Change option image' : 'Add option image'}>
+                        {option.previewUrl ? <img src={option.previewUrl} alt="" /> : <ImagePlus size={17} />}
+                      </button>
+                      {option.imageFile && <button className="icon-button option-image-remove" type="button" onClick={() => removeOptionImage(index)} aria-label={`Remove image from option ${index + 1}`} title="Remove image"><X size={15} /></button>}
+                    </>}
                     {options.length > 2 && (
                       <button className="icon-button remove-option" type="button" aria-label={`Remove option ${index + 1}`} onClick={() => {
                         if (option.previewUrl) URL.revokeObjectURL(option.previewUrl)
@@ -545,7 +606,7 @@ function App() {
                   </div>
                 ))}
               </div>
-              {options.length < 8 && <button className="add-option" type="button" onClick={() => setOptions((current) => [...current, { label: '', imageFile: null, previewUrl: '' }])}><Plus size={15} /> Add an option</button>}
+              {options.length < 8 && <button className="add-option" type="button" onClick={() => setOptions((current) => [...current, { label: '', imageFile: null, previewUrl: '', contentMode: 'text' }])}><Plus size={15} /> Add an option</button>}
               {isQaMode && <label className="reveal-correct-choice"><input type="checkbox" checked={revealCorrect} onChange={(event) => setRevealCorrect(event.target.checked)} /> Show the correct answer to participants who answer wrong</label>}
               {error && <p className="form-error" role="alert">{error}</p>}
               <button className="button button-primary create-button" type="submit" disabled={loading}>
@@ -596,7 +657,7 @@ function App() {
                                                 {poll.isQa && <a className="icon-button" href={`/poll/${poll.id}/monitor`} aria-label={`Open live winner monitor for ${poll.question}`} title="Live winner monitor and history"><Users size={18} /></a>}
                                                 {!poll.isQa && <button className="icon-button" type="button" onClick={() => setEditPoll(poll)} aria-label={`Edit ${poll.question}`} title="Edit poll"><Pencil size={18} /></button>}
                                                 {poll.isQa && <button className="icon-button" type="button" onClick={() => setEditPoll(poll)} aria-label={`Edit ${poll.question}`} title="Edit Q&A"><Pencil size={18} /></button>}
-                                                {poll.isQa && <button className="icon-button" type="button" onClick={() => void deletePoll(poll)} aria-label={`Delete ${poll.question}`} title="Delete Q&A"><Trash2 size={18} /></button>}
+                                                <button className="icon-button" type="button" onClick={() => void deletePoll(poll)} aria-label={`Delete ${poll.question}`} title={`Delete ${poll.isQa ? 'Q&A' : 'poll'}`}><Trash2 size={18} /></button>
                       <button className="icon-button poll-share" onClick={() => setSharePoll(poll)} aria-label={`Show QR code for ${poll.question}`} title="Show QR code"><QrCode size={18} /></button>
                       <a className="icon-button poll-display" href={`/poll/${poll.id}/display`} aria-label={`Display live results for ${poll.question}`} title="Display live results"><MonitorPlay size={18} /></a>
                       <a className="poll-open" href={`/poll/${poll.id}`} aria-label={`Open poll: ${poll.question}`}><ChevronRight size={18} /></a>
@@ -647,6 +708,13 @@ function ActivityDashboard({
           <p>Run a live Q&A or QR poll, bring two players together, or put a selfie on the big screen.</p>
         </section>
         <section className="activity-options" aria-label="Choose an activity">
+          <a className="activity-card raffle-activity" href="/raffle">
+            <span className="activity-card-icon"><Ticket size={25} /></span>
+            <span className="activity-card-kicker">LUCKY DRAW</span>
+            <strong>QR Raffle</strong>
+            <span className="activity-card-description">Register ticket holders by QR code and draw each winner only once.</span>
+            <span className="activity-card-action">Open raffle dashboard <ArrowUpRight size={17} /></span>
+          </a>
           <a className="activity-card qa-activity" href="/voting?mode=qa">
             <span className="activity-card-icon"><CircleHelp size={25} /></span>
             <span className="activity-card-kicker">AUDIENCE Q&amp;A</span>
@@ -1183,15 +1251,20 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
   }
 
   const totalVotes = poll.isQa ? 0 : poll.options.reduce((total, option) => total + option.votes, 0)
-  const leadingVotes = Math.max(...poll.options.map((option) => option.votes), 0)
-  const leader = poll.options.find((option) => option.votes === leadingVotes && leadingVotes > 0)
+  const questionWords = poll.question.trim().split(/\s+/).filter(Boolean)
+  const questionSplit = Math.ceil(questionWords.length / 2)
+  const questionFirstLine = questionWords.slice(0, questionSplit).join(' ')
+  const questionSecondLine = questionWords.slice(questionSplit).join(' ')
 
   return (
     <main className="display-shell">
       <section className="display-heading">
         <div>
           {poll.questionImageUrl &&  <img className="question-image display-question-image" src={poll.questionImageUrl} alt={poll.question || 'Question'} />}
-          {(poll.question || !poll.questionImageUrl) && <h1>{poll.question}</h1>}
+          {(poll.question || !poll.questionImageUrl) && <h1 className="display-question-title">
+            <span className="display-question-first-line">{questionFirstLine}</span>
+            {questionSecondLine && <span className="display-question-second-line"><span>{questionSecondLine}</span></span>}
+          </h1>}
         </div>
       </section>
       <section className="display-grid">
@@ -1212,12 +1285,15 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
             <>
               {poll.options.map((option, index) => {
                 const percent = totalVotes ? Math.round(option.votes / totalVotes * 100) : 0
+                const imageOnly = !option.label.trim() && Boolean(option.imageUrl)
                 return (
-                  <article className={`display-result result-tone-${index % 4}`} key={option.id}>
-                    <span className="display-result-image">{option.imageUrl && <img src={option.imageUrl} alt="" />}</span>
+                  <article className={`display-result result-tone-${index % 4} ${imageOnly ? 'display-result-image-only' : ''}`} key={option.id} style={{ '--result-tone': resultOptionColor(index, poll.options.length) } as CSSProperties}>
+                    <div className="display-result-brand">
+                      {option.imageUrl && <span className="display-result-image"><img src={option.imageUrl} alt="" /></span>}
+                      {option.label && <h2>{option.label}</h2>}
+                    </div>
                     <div className="display-result-body">
                       <div className="display-result-top">
-                        <h2>{option.label}</h2>
                         <span className="display-result-percent">{percent}<small>%</small></span>
                       </div>
                       <div className="display-meter"><span style={{ width: `${percent}%` }} /></div>
@@ -1226,13 +1302,12 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
                   </article>
                 )
               })}
-              {leader && <div className="display-leader"><span className="leader-star">★</span><span>IN THE LEAD</span><strong>{leader.label}</strong></div>}
             </>
           )}
         </div>
         <aside className="display-join">
-          <div className="display-qr">{shareUrl && poll ? <PollQrCode value={shareUrl} logoUrl={poll.logoUrl} size={480} label={poll.isQa ? 'Scan to join this Q&A' : 'Scan to vote in this poll'} /> : <span>Loading QR…</span>}</div>
-          <p className="display-scan">{poll.isQa ? 'SCAN TO JOIN!' : 'SCAN TO VOTE!'}</p>
+          <div className="display-qr">{shareUrl && poll ? <PollQrCode value={shareUrl} logoUrl={poll.logoUrl} size={480} logoSize={200} label={poll.isQa ? 'Scan to join this Q&A' : 'Scan to vote in this poll'} /> : <span>Loading QR…</span>}</div>
+          <p className="display-scan"><Smartphone aria-hidden="true" />{poll.isQa ? 'SCAN TO JOIN!' : 'SCAN TO VOTE'}</p>
         </aside>
       </section>
     </main>

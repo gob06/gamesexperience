@@ -5,7 +5,7 @@ type EditablePoll = {
   id: string
   question: string
   joinTitle?: string | null
-  options: Array<{ id: string; label: string }>
+  options: Array<{ id: string; label: string; imageUrl?: string | null }>
 }
 
 export default function PollEditDialog<T extends EditablePoll>({ poll, onClose, onSaved }: { poll: T; onClose: () => void; onSaved: (poll: T) => void }) {
@@ -53,7 +53,8 @@ export default function PollEditDialog<T extends EditablePoll>({ poll, onClose, 
           {poll.options.map((option, index) => (
             <div className="option-input-row" key={option.id}>
               <span className={`option-marker marker-${index % 4}`}>{String.fromCharCode(65 + index)}</span>
-              <input aria-label={`Answer ${index + 1}`} value={labels[index]} maxLength={80} required onChange={(event) => setLabels((current) => current.map((label, labelIndex) => labelIndex === index ? event.target.value : label))} />
+              {option.imageUrl && <img className="option-edit-image" src={option.imageUrl} alt={`Answer ${index + 1}`} />}
+              <input aria-label={`Answer ${index + 1}`} value={labels[index]} maxLength={80} required={!option.imageUrl} placeholder={option.imageUrl ? 'Optional label' : undefined} onChange={(event) => setLabels((current) => current.map((label, labelIndex) => labelIndex === index ? event.target.value : label))} />
             </div>
           ))}
         </div>

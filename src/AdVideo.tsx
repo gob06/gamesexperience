@@ -1,15 +1,53 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Film, LogOut, Trash2, Upload } from 'lucide-react'
 import { ThemeBrand } from './theme'
 
-export type AdVideoKind = 'poll' | 'qa' | 'game' | 'selfie'
+export type AdVideoKind = 'poll' | 'qa' | 'game' | 'selfie' | 'raffle'
 type AdVideoInfo = { available: boolean; url?: string; name?: string; size?: number; updatedAt?: string }
+const thankYouKey = `games-experience:thank-you:${window.location.pathname}`
+
+export function hasAudienceThankYouCompleted() {
+  try { return window.localStorage.getItem(thankYouKey) === 'done' } catch { return false }
+}
+
+function markAudienceThankYouCompleted() {
+  try { window.localStorage.setItem(thankYouKey, 'done') } catch { /* Continue with the in-memory screen if storage is unavailable. */ }
+  window.dispatchEvent(new Event('audience-thank-you-complete'))
+}
+
+export function ThankYouScreen({ children }: { children?: ReactNode }) {
+  const [showCloseHint, setShowCloseHint] = useState(false)
+
+  useEffect(() => {
+    const currentUrl = window.location.href
+    window.history.pushState({ thankYou: true }, '', currentUrl)
+    const keepThankYouVisible = () => window.history.pushState({ thankYou: true }, '', currentUrl)
+    window.addEventListener('popstate', keepThankYouVisible)
+    return () => window.removeEventListener('popstate', keepThankYouVisible)
+  }, [])
+
+  return (
+    <main className="audience-thank-you-shell">
+      <section className="audience-thank-you" role="status" aria-labelledby="audience-thank-you-title">
+        <div className="audience-thank-you-mark" aria-hidden="true">✓</div>
+        <h1 id="audience-thank-you-title">THANK YOU FOR PARTICIPATING!</h1>
+        <button className="button button-primary audience-thank-you-close" type="button" onClick={() => {
+          setShowCloseHint(true)
+          try { window.close() } catch { /* The browser may refuse to close a tab it did not open. */ }
+        }}>Close</button>
+        {showCloseHint && <p className="audience-thank-you-hint" role="status">You may now safely close this browser tab.</p>}
+        {children}
+      </section>
+    </main>
+  )
+}
 
 const kindLabels: Record<AdVideoKind, { title: string; description: string }> = {
   poll: { title: 'Poll video', description: 'Plays full-screen on a participant’s phone right after they cast a vote.' },
   qa: { title: 'Q&A video', description: 'Plays full-screen on a participant’s phone right after they press Enter on a Q&A answer.' },
   game: { title: 'Vanishing Tic-Tac-Toe video', description: 'Plays full-screen for both players when a match ends.' },
   selfie: { title: 'Selfie Cam video', description: 'Plays full-screen on a guest’s phone right after they send their photo to the host.' },
+  raffle: { title: 'QR Raffle video', description: 'Plays full-screen on a ticket holder’s phone after they register for a raffle.' },
 }
 
 // Full-screen video that cannot be skipped, seeked, paused, or closed; it closes itself when playback ends or fails.
@@ -67,7 +105,7 @@ export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: ()
         onTimeUpdate={(event) => { if (!event.currentTarget.seeking) lastTime.current = event.currentTarget.currentTime }}
         onSeeking={(event) => { event.currentTarget.currentTime = lastTime.current }}
         onPause={(event) => { if (!event.currentTarget.ended) void start() }}
-        onEnded={() => finish.current()}
+        onEnded={() => { markAudienceThankYouCompleted(); finish.current() }}
         onError={() => finish.current()}
       />
     </div>
@@ -153,7 +191,7 @@ function AdVideoSlot({ kind, info, maxBytes, onChange }: { kind: AdVideoKind; in
 }
 
 export function AdVideoSettings({ username, onLogout }: { username: string; onLogout: () => void }) {
-  const [videos, setVideos] = useState<{ poll: AdVideoInfo; qa: AdVideoInfo; game: AdVideoInfo; selfie: AdVideoInfo; maxBytes: number } | null>(null)
+  const [videos, setVideos] = useState<{ poll: AdVideoInfo; qa: AdVideoInfo; game: AdVideoInfo; selfie: AdVideoInfo; raffle: AdVideoInfo; maxBytes: number } | null>(null)
   const [error, setError] = useState('')
 
   async function refresh() {
@@ -162,7 +200,7 @@ export function AdVideoSettings({ username, onLogout }: { username: string; onLo
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Could not load the videos.')
       const missing = { available: false }
-      setVideos({ ...result, poll: result.poll ?? missing, qa: result.qa ?? missing, game: result.game ?? missing, selfie: result.selfie ?? missing })
+      setVideos({ ...result, poll: result.poll ?? missing, qa: result.qa ?? missing, game: result.game ?? missing, selfie: result.selfie ?? missing, raffle: result.raffle ?? missing })
       setError('')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not load the videos.')
@@ -184,6 +222,7 @@ export function AdVideoSettings({ username, onLogout }: { username: string; onLo
             <AdVideoSlot kind="qa" info={videos.qa} maxBytes={videos.maxBytes} onChange={refresh} />
             <AdVideoSlot kind="game" info={videos.game} maxBytes={videos.maxBytes} onChange={refresh} />
             <AdVideoSlot kind="selfie" info={videos.selfie} maxBytes={videos.maxBytes} onChange={refresh} />
+            <AdVideoSlot kind="raffle" info={videos.raffle} maxBytes={videos.maxBytes} onChange={refresh} />
           </div>
         )}
       </div>

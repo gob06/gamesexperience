@@ -372,10 +372,12 @@ export function registerQaRoutes({
     if (body.revealCorrect !== undefined && typeof body.revealCorrect !== 'boolean') return response.status(400).json({ error: 'Reveal setting must be true or false.' })
     const joinTitle = body.joinTitle === undefined ? undefined : typeof body.joinTitle === 'string' ? body.joinTitle.trim() : null
     if (joinTitle === null || (joinTitle !== undefined && joinTitle.length > 80)) return response.status(400).json({ error: 'The join title must be 80 characters or fewer.' })
-    const optionIds = new Set((await database.prepare('SELECT id FROM poll_options WHERE poll_id = ?').all(poll.id)).map((option) => option.id))
+    const optionRows = await database.prepare('SELECT id, CASE WHEN image IS NULL THEN 0 ELSE 1 END AS hasImage FROM poll_options WHERE poll_id = ?').all(poll.id)
+    const optionsById = new Map(optionRows.map((option) => [option.id, option]))
+    const optionIds = new Set(optionsById.keys())
     const labels = Array.isArray(body.options) ? body.options.map((option) => ({ id: option?.id, label: typeof option?.label === 'string' ? option.label.trim() : '' })) : []
-    if (body.options !== undefined && (!Array.isArray(body.options) || labels.some((option) => !optionIds.has(option.id) || !option.label || option.label.length > 80))) {
-      return response.status(400).json({ error: 'Answer options must be 1–80 characters.' })
+    if (body.options !== undefined && (!Array.isArray(body.options) || labels.some((option) => !optionIds.has(option.id) || (!option.label && !optionsById.get(option.id)?.hasImage) || option.label.length > 80))) {
+      return response.status(400).json({ error: 'Answer options need text or an image and must be 80 characters or fewer.' })
     }
     if (body.correctOptionId !== undefined) {
       if (typeof body.correctOptionId !== 'string' || !optionIds.has(body.correctOptionId)) return response.status(400).json({ error: 'Choose one of the answers as correct.' })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { ArrowUpRight, Check } from 'lucide-react'
 import { ThemeBrand } from './theme'
 import { TermsNotice } from './terms'
+import { ThankYouScreen } from './AdVideo'
 
 export type QaPoll = {
   id: string
@@ -241,7 +242,7 @@ export default function QaAudience({ pollId, initialPoll }: { pollId: string; in
   } else if (session.submitted && !session.adCompleted) {
     body = <QaAdPlayer pollId={pollId} onCompleted={() => setSession((current) => current && { ...current, adCompleted: true })} />
   } else if (session.submitted) {
-    body = <ResultScreen pollId={pollId} />
+    body = <ThankYouScreen><ResultScreen pollId={pollId} /></ThankYouScreen>
   } else if (!session.registered) {
     body = (
       <form className="vote-card qa-register" onSubmit={(event) => void register(event)}>

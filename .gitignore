@@ -6,3 +6,4 @@ data/selfies/
 data/ad-videos/
 data/theme-assets/
 data/roomvote.sqlite*
+data/roomvote-local.sqlite*

@@ -4,7 +4,8 @@ VOTE is a self-hosted live polling app. Create a question, display its QR code, 
 
 ## Requirements
 
-- Node.js 18+ (24 recommended)
+- Node.js 18+ for the MariaDB mode (24 recommended)
+- Node.js 22.13+ for local SQLite testing
 - npm
 - MariaDB 10.5+ (a database and a user with full rights on it)
 
@@ -19,6 +20,18 @@ npm run dev
 ```
 
 Open the Vite URL printed in the terminal, normally `http://localhost:5173`, and sign in to the activity dashboard. Choose **Q&A** to create a question with predefined answers the audience can select; the host marks exactly one answer as correct before creating it. See [Q&A game](#qa-game) for the full flow. A Q&A question can be text only, or an uploaded image (JPEG, PNG, or WebP, 5 MB max) with an optional caption. Choose **QR Voting** to manage regular polls. Both use the poll dashboard and live QR voting flow. Choose **Vanishing Tic-Tac-Toe** to open game room management at `/game`, or **Selfie Cam** to create a guest photo-upload QR and moderate full-screen submissions at `/selfie`. The voting management dashboard is also available at `/voting`. The API runs on port `4179`; the MariaDB tables are created on first start from `db/mariadb-schema.sql`.
+
+### Local testing with SQLite
+
+To run a local test instance without MariaDB, use Node.js 22.13 or newer and select the opt-in SQLite driver in PowerShell:
+
+```powershell
+$env:DB_DRIVER = 'sqlite'
+$env:SQLITE_PATH = 'data/roomvote-local.sqlite'
+npm run dev
+```
+
+If `SQLITE_PATH` is omitted, the database defaults to `data/roomvote-local.sqlite`. It is separate from the MariaDB database and from the older SQLite migration source. `DB_DRIVER` is not set by default, so production continues to use MariaDB.
 
 ## Admin access
 
@@ -78,7 +91,7 @@ Environment variables: `DATABASE_URL` (or `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_P
 
 ## Video ads
 
-Admins can open **Videos** from the dashboard (`/admin/videos`) and upload one MP4 or WebM each for polls, Q&A, Vanishing Tic-Tac-Toe, and Selfie Cam. The poll video plays full-screen on a participant's phone right after their vote is recorded; the Q&A video plays the same way after a participant presses **Enter** on a Q&A answer (Q&A uses its own slot, not the poll video); the game video plays for both players when a match ends; the selfie video plays on a guest's phone right after they send their photo. Viewers cannot skip, seek, pause, or close the video; it closes when it finishes (or if it fails to load). With no video uploaded, nothing plays. Files are stored under `data/ad-videos` (back it up together with the MariaDB database). Set `AD_VIDEO_MAX_BYTES` to change the 200 MB upload limit (1 byte–1 GB). The game rematch countdown is a fixed 20 seconds and keeps running while the video plays.
+Admins can open **Videos** from the dashboard (`/admin/videos`) and upload one MP4 or WebM each for polls, Q&A, Vanishing Tic-Tac-Toe, Selfie Cam, and QR Raffle. The poll video plays full-screen on a participant's phone right after their vote is recorded; the Q&A video plays the same way after a participant presses **Enter** on a Q&A answer (Q&A uses its own slot, not the poll video); the game video plays for both players when a match ends; the selfie video plays on a guest's phone right after they send their photo; the raffle video plays on a ticket holder's phone after successful raffle registration. Viewers cannot skip, seek, pause, or close the video; it closes when it finishes (or if it fails to load). With no video uploaded, nothing plays. Files are stored under `data/ad-videos` (back it up together with the MariaDB database). Set `AD_VIDEO_MAX_BYTES` to change the 200 MB upload limit (1 byte–1 GB). The game rematch countdown is a fixed 20 seconds and keeps running while the video plays.
 
 ## Appearance & Theme Settings
 

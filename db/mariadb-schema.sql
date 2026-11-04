@@ -10,6 +10,16 @@ CREATE TABLE IF NOT EXISTS ad_videos (
   CHECK (kind IN ('poll', 'qa', 'game', 'selfie'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+CREATE TABLE IF NOT EXISTS raffle_ad_videos (
+  kind VARCHAR(16) NOT NULL PRIMARY KEY,
+  file_name VARCHAR(255) NOT NULL,
+  original_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(100) NOT NULL,
+  size BIGINT NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  CHECK (kind = 'raffle')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
 CREATE TABLE IF NOT EXISTS polls (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
   question TEXT NOT NULL,
@@ -242,4 +252,32 @@ CREATE TABLE IF NOT EXISTS theme_audit_logs (
   action VARCHAR(100) NOT NULL,
   details TEXT NOT NULL,
   created_at VARCHAR(32) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS raffle_sessions (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  title VARCHAR(120) NOT NULL,
+  logo_mime_type VARCHAR(100) NULL,
+  logo LONGBLOB NULL,
+  draw_status VARCHAR(16) NOT NULL DEFAULT 'idle',
+  created_by VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  CHECK (draw_status IN ('idle', 'drawing')),
+  INDEX raffle_sessions_created_at (created_at),
+  FOREIGN KEY (created_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS raffle_entries (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  raffle_id VARCHAR(64) NOT NULL,
+  participant_name VARCHAR(80) NOT NULL,
+  ticket_number VARCHAR(40) NOT NULL,
+  ticket_key VARCHAR(40) NOT NULL,
+  registered_at VARCHAR(32) NOT NULL,
+  won_at VARCHAR(32) NULL,
+  UNIQUE KEY raffle_entries_ticket (raffle_id, ticket_key),
+  INDEX raffle_entries_raffle_registered (raffle_id, registered_at),
+  INDEX raffle_entries_raffle_won (raffle_id, won_at),
+  FOREIGN KEY (raffle_id) REFERENCES raffle_sessions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

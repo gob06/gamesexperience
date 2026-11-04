@@ -8,6 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createDatabase, readDatabaseConfig } from './db.mjs'
 import { registerQaRoutes } from './qa.mjs'
+import { registerRaffleRoutes } from './raffle.mjs'
 import { rateLimit } from './rate-limit.mjs'
 import { defaultTerms } from './defaultTerms.mjs'
 
@@ -39,7 +40,7 @@ const adVideosDirectory = path.join(dataDirectory, 'ad-videos')
 mkdirSync(dataDirectory, { recursive: true })
 mkdirSync(themeAssetsDirectory, { recursive: true })
 mkdirSync(adVideosDirectory, { recursive: true })
-const database = createDatabase(readDatabaseConfig())
+const database = await createDatabase(readDatabaseConfig())
 await database.initializeSchema()
 const inTransaction = (action) => database.transaction(action)
 
@@ -1208,7 +1209,7 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
         imageIndex: option.imageIndex === null ? null : Number.isInteger(option.imageIndex) ? option.imageIndex : -1,
         isCorrect: option.isCorrect === true,
       }
-    }).filter((option) => option.label).slice(0, 8)
+    }).filter((option) => option.label || option.imageIndex !== null).slice(0, 8)
     : []
   const optionFiles = request.files?.optionImages || []
   const logoFile = request.files?.logo?.[0]
@@ -1278,10 +1279,12 @@ app.patch('/api/polls/:id', requireUser, async (request, response, next) => {
   if (question.length < 3 || question.length > 160) return response.status(400).json({ error: 'Add a question of 3–160 characters.' })
   const joinTitle = typeof body.joinTitle === 'string' ? body.joinTitle.trim() : ''
   if (joinTitle.length > 80) return response.status(400).json({ error: 'The join title must be 80 characters or fewer.' })
-  const optionIds = new Set((await database.prepare('SELECT id FROM poll_options WHERE poll_id = ?').all(poll.id)).map((option) => option.id))
+  const optionRows = await database.prepare('SELECT id, CASE WHEN image IS NULL THEN 0 ELSE 1 END AS hasImage FROM poll_options WHERE poll_id = ?').all(poll.id)
+  const optionsById = new Map(optionRows.map((option) => [option.id, option]))
+  const optionIds = new Set(optionsById.keys())
   const labels = Array.isArray(body.options) ? body.options.map((option) => ({ id: option?.id, label: typeof option?.label === 'string' ? option.label.trim() : '' })) : []
-  if (labels.length !== optionIds.size || labels.some((option) => !optionIds.has(option.id) || !option.label || option.label.length > 80)) {
-    return response.status(400).json({ error: 'Answer options must be 1–80 characters.' })
+  if (labels.length !== optionIds.size || labels.some((option) => !optionIds.has(option.id) || (!option.label && !optionsById.get(option.id)?.hasImage) || option.label.length > 80)) {
+    return response.status(400).json({ error: 'Answer options need text or an image and must be 80 characters or fewer.' })
   }
   await inTransaction(async () => {
     await database.prepare('UPDATE polls SET question = ?, join_title = ? WHERE id = ?').run(question, joinTitle || null, poll.id)
@@ -1337,7 +1340,9 @@ const qa = registerQaRoutes({
   selectPoll, selectAdVideo, adVideosDirectory, inTransaction, getPoll, audit,
 })
 
-const adVideoKinds = ['poll', 'qa', 'game', 'selfie']
+registerRaffleRoutes({ app, database, requireUser, imageUpload, hasValidImageSignature, inTransaction, audit })
+
+const adVideoKinds = ['poll', 'qa', 'game', 'selfie', 'raffle']
 const adVideoTypes = { 'video/mp4': '.mp4', 'video/webm': '.webm' }
 
 function requireAdVideoKind(request, response, next) {
@@ -1370,7 +1375,8 @@ const adVideoUpload = multer({
 })
 
 function selectAdVideo(kind) {
-  return database.prepare('SELECT kind, file_name AS fileName, original_name AS originalName, mime_type AS mimeType, size, updated_at AS updatedAt FROM ad_videos WHERE kind = ?').get(kind)
+  const table = kind === 'raffle' ? 'raffle_ad_videos' : 'ad_videos'
+  return database.prepare(`SELECT kind, file_name AS fileName, original_name AS originalName, mime_type AS mimeType, size, updated_at AS updatedAt FROM ${table} WHERE kind = ?`).get(kind)
 }
 
 function adVideoSummary(video) {
@@ -1380,7 +1386,7 @@ function adVideoSummary(video) {
 }
 
 app.get('/api/admin/ad-videos', requireAdmin, async (_request, response) => {
-  response.json({ poll: adVideoSummary(await selectAdVideo('poll')), qa: adVideoSummary(await selectAdVideo('qa')), game: adVideoSummary(await selectAdVideo('game')), selfie: adVideoSummary(await selectAdVideo('selfie')), maxBytes: adVideoMaxBytes })
+  response.json({ poll: adVideoSummary(await selectAdVideo('poll')), qa: adVideoSummary(await selectAdVideo('qa')), game: adVideoSummary(await selectAdVideo('game')), selfie: adVideoSummary(await selectAdVideo('selfie')), raffle: adVideoSummary(await selectAdVideo('raffle')), maxBytes: adVideoMaxBytes })
 })
 
 app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoUpload.single('video'), async (request, response) => {
@@ -1394,8 +1400,9 @@ app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoU
   const fileName = `${kind}-${randomUUID()}${adVideoTypes[file.mimetype]}`
   renameSync(file.path, path.join(adVideosDirectory, fileName))
   const previous = await selectAdVideo(kind)
+  const table = kind === 'raffle' ? 'raffle_ad_videos' : 'ad_videos'
   await database.prepare(`
-    INSERT INTO ad_videos (kind, file_name, original_name, mime_type, size, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO ${table} (kind, file_name, original_name, mime_type, size, updated_at) VALUES (?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE file_name = VALUES(file_name), original_name = VALUES(original_name),
       mime_type = VALUES(mime_type), size = VALUES(size), updated_at = VALUES(updated_at)
   `).run(kind, fileName, path.basename(file.originalname).slice(0, 120), file.mimetype, file.size, new Date().toISOString())
@@ -1407,7 +1414,8 @@ app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoU
 app.delete('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, async (request, response) => {
   const previous = await selectAdVideo(request.params.kind)
   if (!previous) return response.status(404).json({ error: 'No video has been uploaded for this slot.' })
-  await database.prepare('DELETE FROM ad_videos WHERE kind = ?').run(request.params.kind)
+  const table = request.params.kind === 'raffle' ? 'raffle_ad_videos' : 'ad_videos'
+  await database.prepare(`DELETE FROM ${table} WHERE kind = ?`).run(request.params.kind)
   removeAdVideoFile(previous.fileName)
   await audit(request, 'ad-video.delete', 'ad-video', request.params.kind)
   response.status(204).end()

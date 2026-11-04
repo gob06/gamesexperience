@@ -32,7 +32,7 @@ if (!existsSync(sourceFile)) {
 
 const sqlite = new DatabaseSync(sourceFile, { readOnly: true })
 const sourceTables = new Set(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name))
-const database = createDatabase(readDatabaseConfig())
+const database = await createDatabase(readDatabaseConfig())
 const copiedAssets = []
 
 try {

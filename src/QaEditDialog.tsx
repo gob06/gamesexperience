@@ -6,7 +6,7 @@ type EditablePoll = {
   question: string
   joinTitle?: string | null
   questionImageUrl?: string | null
-  options: Array<{ id: string; label: string }>
+  options: Array<{ id: string; label: string; imageUrl?: string | null }>
   revealCorrect?: boolean
   correctOptionId?: string | null
   stats?: { submissions: number }
@@ -62,7 +62,8 @@ export default function QaEditDialog<T extends EditablePoll>({ poll, onClose, on
           {poll.options.map((option, index) => (
             <div className="option-input-row" key={option.id}>
               <span className={`option-marker marker-${index % 4}`}>{String.fromCharCode(65 + index)}</span>
-              <input aria-label={`Answer ${index + 1}`} value={labels[index]} maxLength={80} required onChange={(event) => setLabels((current) => current.map((label, labelIndex) => labelIndex === index ? event.target.value : label))} />
+              {option.imageUrl && <img className="option-edit-image" src={option.imageUrl} alt={`Answer ${index + 1}`} />}
+              <input aria-label={`Answer ${index + 1}`} value={labels[index]} maxLength={80} required={!option.imageUrl} placeholder={option.imageUrl ? 'Optional label' : undefined} onChange={(event) => setLabels((current) => current.map((label, labelIndex) => labelIndex === index ? event.target.value : label))} />
               <label className="correct-answer-choice"><input type="radio" name="edit-correct" checked={correctOptionId === option.id} disabled={locked} onChange={() => setCorrectOptionId(option.id)} aria-label={`Mark answer ${index + 1} as correct`} /><span>Correct</span></label>
             </div>
           ))}
