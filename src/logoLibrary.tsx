@@ -83,7 +83,7 @@ async function migrateLegacyLogos() {
   return true
 }
 
-export function SavedLogoPicker({ onSelect }: { onSelect: (logo: SavedLogo) => void }) {
+export function SavedLogoPicker({ onSelect, label = 'Image bank' }: { onSelect: (logo: SavedLogo) => void; label?: string }) {
   const [logos, setLogos] = useState<SavedLogo[]>([])
 
   useEffect(() => {
@@ -97,8 +97,8 @@ export function SavedLogoPicker({ onSelect }: { onSelect: (logo: SavedLogo) => v
 
   if (!logos.length) return null
   return (
-    <div className="saved-logos" role="group" aria-label="Image bank">
-      <span className="saved-logos-label">Image bank</span>
+    <div className="saved-logos" role="group" aria-label={label}>
+      <span className="saved-logos-label">{label}</span>
       <div className="saved-logos-list">
         {logos.map((logo) => (
           <span className="saved-logo" key={logo.id}>

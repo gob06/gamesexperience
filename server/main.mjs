@@ -942,6 +942,28 @@ app.post('/api/selfie/sessions', requireUser, async (request, response) => {
   response.status(201).json({ id: sessionId, joinToken, expiresAt })
 })
 
+app.post('/api/selfie/sessions/:id/banner', requireUser, imageUpload.single('image'), async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
+  if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
+  const { file } = request
+  if (!file || !hasValidImageSignature(file.mimetype, file.buffer)) {
+    return response.status(400).json({ error: 'Upload a valid JPEG, PNG, or WebP image.' })
+  }
+  await database.prepare('UPDATE selfie_sessions SET banner_mime_type = ?, banner = ? WHERE id = ?').run(file.mimetype, file.buffer, session.id)
+  response.status(204).end()
+})
+
+app.get('/api/selfie/join/:token/banner', async (request, response) => {
+  const token = request.params.token
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).end()
+  const row = await database.prepare(`
+    SELECT banner, banner_mime_type AS mimeType, expires_at AS expiresAt, closed_at AS closedAt
+    FROM selfie_sessions WHERE join_token_hash = ?
+  `).get(hashSessionToken(token))
+  if (!row?.banner || row.closedAt || Date.parse(row.expiresAt) <= Date.now()) return response.status(404).end()
+  response.type(row.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(row.banner))
+})
+
 app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request, response) => {
   const token = request.params.token
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).json({ error: 'This selfie session is invalid or has expired.' })

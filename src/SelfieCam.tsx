@@ -3,7 +3,7 @@ import QRCode from 'qrcode'
 import { ArrowLeft, Camera, Check, ImagePlus, Maximize, Minimize, QrCode, Trash2, Upload, X } from 'lucide-react'
 import { ThemeBrand } from './theme'
 import { AdVideoOverlay } from './AdVideo'
-import { SavedLogoPicker, saveLogo, type SavedLogo } from './logoLibrary'
+import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 
 type SelfieSession = { id: string; joinToken: string; expiresAt: string }
 type SelfieSubmission = { id: string; fileName: string; status: 'pending' | 'approved'; createdAt: string }
@@ -24,6 +24,9 @@ export default function SelfieCam() {
   const qrCanvasRef = useRef<HTMLCanvasElement>(null)
   const displayRef = useRef<HTMLElement>(null)
   const logoUrlRef = useRef('')
+  const bannerInputRef = useRef<HTMLInputElement>(null)
+  const [bannerFile, setBannerFile] = useState<File | null>(null)
+  const [bannerPreview, setBannerPreview] = useState('')
   const [session, setSession] = useState<SelfieSession | null>(null)
   const [joinUrl, setJoinUrl] = useState('')
   const [qrLogoUrl, setQrLogoUrl] = useState('')
@@ -61,6 +64,30 @@ export default function SelfieCam() {
     setError('')
   }
 
+  async function useSavedBanner(logo: SavedLogo) {
+    const file = await logoToFile(logo)
+    setBannerFile(file)
+    setBannerPreview(URL.createObjectURL(file))
+  }
+
+  function chooseBanner(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Choose a JPEG, PNG, or WebP photo.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('The guest page photo must be 5 MB or smaller.')
+      return
+    }
+    setError('')
+    setBannerFile(file)
+    setBannerPreview(URL.createObjectURL(file))
+    void saveLogo(file)
+  }
+
   async function createSession() {
     setLoading(true)
     setError('')
@@ -69,6 +96,11 @@ export default function SelfieCam() {
       const response = await fetch('/api/selfie/sessions', { method: 'POST' })
       const result = await response.json() as SelfieSession & { error?: string }
       if (!response.ok || !result.id || !result.joinToken) throw new Error(result.error || 'Could not create a selfie session.')
+      if (bannerFile) {
+        const form = new FormData()
+        form.append('image', bannerFile)
+        await fetch(`/api/selfie/sessions/${encodeURIComponent(result.id)}/banner`, { method: 'POST', body: form }).catch(() => undefined)
+      }
       const url = await getSelfieJoinUrl(result.joinToken)
       try {
         if (qrLogoUrl) {
@@ -256,7 +288,14 @@ export default function SelfieCam() {
                 <span>{qrLogoUrl ? 'Custom QR logo selected' : 'Optional center logo · JPEG, PNG, WebP · 5 MB max'}</span>
                 <button className="button button-secondary" type="button" onClick={() => logoInputRef.current?.click()}><Upload size={15} /> {qrLogoUrl ? 'Change logo' : 'Upload QR logo'}</button>
               </div>
-              <SavedLogoPicker onSelect={useSavedLogo} />
+              <SavedLogoPicker onSelect={useSavedLogo} label="Image bank (QR logo)" />
+              <input ref={bannerInputRef} className="selfie-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseBanner} aria-label="Upload a photo for the guest page" />
+              <div className="selfie-qr-logo-picker">
+                {bannerPreview ? <img src={bannerPreview} alt="Guest page photo preview" /> : <ImagePlus size={20} />}
+                <span>{bannerPreview ? 'Guest page photo selected' : 'Optional photo shown at the top of the guest page · JPEG, PNG, WebP · 5 MB max'}</span>
+                <button className="button button-secondary" type="button" onClick={() => bannerInputRef.current?.click()}><Upload size={15} /> {bannerPreview ? 'Change photo' : 'Upload guest page photo'}</button>
+              </div>
+              <SavedLogoPicker onSelect={(logo) => void useSavedBanner(logo)} label="Image bank (guest page photo)" />
               <button className="button button-primary selfie-start-button" type="button" onClick={() => void createSession()} disabled={loading}><QrCode size={17} /> {loading ? 'Creating session…' : 'Create selfie QR code'}</button>
             </div>
           ) : (
@@ -317,6 +356,7 @@ export function SelfieParticipant({ token }: { token: string }) {
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [showAd, setShowAd] = useState(false)
+  const [bannerOk, setBannerOk] = useState(true)
   const [error, setError] = useState('')
 
   function stopCamera() {
@@ -422,7 +462,11 @@ export function SelfieParticipant({ token }: { token: string }) {
       {showAd && <AdVideoOverlay kind="selfie" onDone={() => setShowAd(false)} />}
       <header className="selfie-topbar"><ThemeBrand /><a className="game-back-link" href="/"><ArrowLeft size={16} /> Back</a></header>
       <div className="selfie-content">
-        <section className="selfie-heading"><span className="activity-eyebrow"><Camera size={15} /> SELFIE CAM</span><h1>Share your moment.</h1><p>Your photo goes to the host for review and will only appear on the big screen if approved.</p></section>
+        {bannerOk ? (
+          <section className="selfie-guest-banner"><img src={`/api/selfie/join/${encodeURIComponent(token)}/banner`} alt="" onError={() => setBannerOk(false)} /></section>
+        ) : (
+          <section className="selfie-heading"><span className="activity-eyebrow"><Camera size={15} /> SELFIE CAM</span><h1>Share your moment.</h1><p>Your photo goes to the host for review and will only appear on the big screen if approved.</p></section>
+        )}
         <section className="selfie-panel">
           <input ref={fileInputRef} className="selfie-file-input" type="file" accept="image/jpeg,image/png,image/webp" capture="user" onChange={(event) => {
             const file = event.currentTarget.files?.[0]

@@ -1123,3 +1123,6 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .selfie-display-qr { --qr-size: min(480px, 40vw, 62vh); align-self: center; align-items: center; justify-content: flex-start; height: auto; padding: clamp(14px, 1.6vw, 28px); gap: clamp(10px, 1.6vh, 20px); }
 .selfie-display-qr canvas { width: var(--qr-size) !important; height: var(--qr-size) !important; }
 .selfie-display-qr p { width: var(--qr-size); }
+
+.selfie-guest-banner { display: flex; justify-content: center; margin: 0 0 18px; }
+.selfie-guest-banner img { display: block; width: 100%; max-height: 38vh; object-fit: cover; border-radius: 16px; }
