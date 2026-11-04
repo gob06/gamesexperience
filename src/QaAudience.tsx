@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ArrowUpRight, Check } from 'lucide-react'
 import { ThemeBrand } from './theme'
+import { TermsNotice } from './terms'
 
 export type QaPoll = {
   id: string
@@ -251,7 +252,8 @@ export default function QaAudience({ pollId, initialPoll }: { pollId: string; in
         <label className="qa-name-label" htmlFor="qa-ticket-number">Ticket number<input id="qa-ticket-number" className="qa-name-input" type="text" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder="Your ticket number" required disabled={!poll.votingEnabled} /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="button button-primary submit-vote" type="submit" disabled={busy || !poll.votingEnabled || !fullName.trim() || !ticketNumber.trim()}>Continue <ArrowUpRight size={17} /></button>
-      </form>
+                <TermsNotice />
+              </form>
     )
   } else {
     body = (
@@ -272,7 +274,8 @@ export default function QaAudience({ pollId, initialPoll }: { pollId: string; in
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="button button-primary submit-vote qa-enter" type="button" onClick={() => void enter()} disabled={!selected || busy || !poll.votingEnabled}>ENTER <Check size={18} /></button>
-      </section>
+                <TermsNotice />
+              </section>
     )
   }
 

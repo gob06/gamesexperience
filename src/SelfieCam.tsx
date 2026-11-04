@@ -3,6 +3,7 @@ import QRCode from 'qrcode'
 import { ArrowLeft, Camera, Check, ImagePlus, Maximize, Minimize, Pause, Play, QrCode, Trash2, Upload, X } from 'lucide-react'
 import { ThemeBrand } from './theme'
 import { AdVideoOverlay } from './AdVideo'
+import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 
 type SelfieSession = { id: string; joinToken: string; expiresAt: string }
@@ -518,6 +519,7 @@ export function SelfieParticipant({ token }: { token: string }) {
                 <button className="button button-secondary" type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={16} /> Choose another</button>
                 <button className="button button-primary" type="button" onClick={() => void submitPhoto()} disabled={submitting || submitted || uploadsPaused}><Upload size={16} /> {submitted ? 'Sent for host approval' : uploadsPaused ? 'Uploads paused' : submitting ? 'Sending…' : 'Send to host'}</button>
               </div>
+              <TermsNotice />
               {submitted && <p className="selfie-notice">Your photo was sent. The host will review it before displaying it.</p>}
               <button className="selfie-retake-link" type="button" onClick={() => void startCamera()}><Camera size={14} /> Take a new photo</button>
             </>

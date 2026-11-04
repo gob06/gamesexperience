@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { createDatabase, readDatabaseConfig } from './db.mjs'
 import { registerQaRoutes } from './qa.mjs'
 import { rateLimit } from './rate-limit.mjs'
+import { defaultTerms } from './defaultTerms.mjs'
 
 const app = express()
 const port = Number(process.env.PORT || 4179)
@@ -670,6 +671,30 @@ app.post('/api/games/:id/rematch', async (request, response) => {
 
   if (result.error) return response.status(result.status).json({ error: result.error })
   response.json(result.game)
+})
+
+async function loadTerms() {
+  const row = await database.prepare('SELECT content, version, updated_at AS updatedAt FROM terms_of_service WHERE id = 1').get()
+  return row ? { content: row.content, version: Number(row.version), updatedAt: row.updatedAt } : { content: defaultTerms, version: 1, updatedAt: null }
+}
+
+app.get('/api/terms', async (_request, response) => {
+  response.set('Cache-Control', 'no-store').json(await loadTerms())
+})
+
+app.put('/api/admin/terms', requireAdmin, async (request, response) => {
+  const content = typeof request.body?.content === 'string' ? request.body.content.replace(/\r\n/g, '\n').trim() : ''
+  if (!content) return response.status(400).json({ error: 'Enter the Terms of Service text.' })
+  if (content.length > 60000) return response.status(400).json({ error: 'The Terms of Service must be 60,000 characters or fewer.' })
+  const existing = await database.prepare('SELECT version FROM terms_of_service WHERE id = 1').get()
+  const version = existing ? Number(existing.version) + 1 : 2
+  const now = new Date().toISOString()
+  if (existing) {
+    await database.prepare('UPDATE terms_of_service SET content = ?, version = ?, updated_at = ?, updated_by = ? WHERE id = 1').run(content, version, now, request.user.id)
+  } else {
+    await database.prepare('INSERT INTO terms_of_service (id, content, version, updated_at, updated_by) VALUES (1, ?, ?, ?, ?)').run(content, version, now, request.user.id)
+  }
+  response.json({ content, version, updatedAt: now })
 })
 
 app.get('/api/admin/users', requireAdmin, async (_request, response) => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { Gamepad2 } from 'lucide-react'
 import { AdVideoOverlay } from './AdVideo'
 import { useTheme } from './theme'
+import { TermsNotice } from './terms'
 
 type Player = 'X' | 'O'
 type GameState = {
@@ -215,6 +216,7 @@ export default function VanishingGame({ roomId }: { roomId?: string }) {
             <input id="guest-name" value={playerName} onChange={(event) => setPlayerName(event.target.value)} maxLength={24} placeholder="Player O" required />
             {error && <p className="game-error" role="alert">{error}</p>}
             <button className="button button-primary game-action" type="submit" disabled={busy}>{busy ? 'Joining…' : 'Join game'}</button>
+            <TermsNotice />
             <p className="game-rule-note">Each player keeps up to 3 marks. On a non-winning fourth move, your oldest mark disappears; a winning line stays on the board.</p>
           </form>
         )}

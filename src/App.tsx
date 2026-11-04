@@ -8,6 +8,7 @@ import {
   CircleHelp,
   Copy,
   Download,
+  FileText,
   Film,
   Gamepad2,
   ImagePlus,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react'
 import ThemeSettings from './ThemeSettings'
 import { AdVideoOverlay, AdVideoSettings } from './AdVideo'
+import { TermsNotice, TermsSettings } from './terms'
 import QaAudience from './QaAudience'
 import QaMonitor from './QaMonitor'
 import QaEditDialog from './QaEditDialog'
@@ -372,7 +374,7 @@ function App() {
     setAuthUser(user)
     setSetupRequired(false)
     setAuthError('')
-    if (['/admin/users', '/admin/theme', '/admin/game-theme', '/admin/videos'].includes(window.location.pathname) && user.role !== 'admin') window.location.replace('/')
+    if (['/admin/users', '/admin/theme', '/admin/game-theme', '/admin/videos', '/admin/terms'].includes(window.location.pathname) && user.role !== 'admin') window.location.replace('/')
   }
 
   async function updatePollSettings(pollId: string, settings: Partial<Pick<Poll, 'votingEnabled' | 'videoEnabled' | 'revealCorrect'>>) {
@@ -428,6 +430,11 @@ function App() {
   if (window.location.pathname === '/admin/videos') {
     return authUser.role === 'admin'
       ? <AdVideoSettings username={authUser.username} onLogout={() => void logout()} />
+      : <AccessDeniedPage onLogout={() => void logout()} />
+  }
+  if (window.location.pathname === '/admin/terms') {
+    return authUser.role === 'admin'
+      ? <TermsSettings username={authUser.username} onLogout={() => void logout()} />
       : <AccessDeniedPage onLogout={() => void logout()} />
   }
   if (window.location.pathname === '/admin/users') {
@@ -625,6 +632,7 @@ function ActivityDashboard({
         <div className="topbar-actions">
           {user.role === 'admin' && <>
             <a className="button button-quiet manage-users-link" href="/admin/videos" aria-label="Manage videos" title="Manage videos"><Film size={16} /> Videos</a>
+            <a className="button button-quiet manage-users-link" href="/admin/terms" aria-label="Edit Terms of Service" title="Edit Terms of Service"><FileText size={16} /> Terms</a>
             <a className="button button-quiet manage-users-link theme-settings-link" href="/admin/theme" aria-label="Appearance and theme settings" title="Appearance and theme settings"><Palette size={16} /> Appearance &amp; Theme Settings</a>
             <a className="button button-quiet manage-users-link" href="/admin/users" aria-label="Manage users" title="Manage users"><Users size={16} /> Manage users</a>
           </>}
@@ -1107,7 +1115,7 @@ function VotePage({ pollId }: { pollId: string }) {
               })}
             </div>
             {error && <p className="form-error" role="alert">{error}</p>}
-            {sessionReady && !voted && poll.votingEnabled && <button className="button button-primary submit-vote" onClick={() => void castVote()} disabled={!selected}>Cast my vote <ArrowUpRight size={17} /></button>}
+            {sessionReady && !voted && poll.votingEnabled && <><button className="button button-primary submit-vote" onClick={() => void castVote()} disabled={!selected}>Cast my vote <ArrowUpRight size={17} /></button><TermsNotice /></>}
             {voted && <div className="vote-confirmation" role="status"><Check size={16} /> Vote recorded · one vote per session</div>}
           </section>
         ) : null}
