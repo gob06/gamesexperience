@@ -202,6 +202,16 @@ CREATE TABLE IF NOT EXISTS selfie_submissions (
 
 ALTER TABLE selfie_submissions ADD COLUMN IF NOT EXISTS approved_at VARCHAR(32) NULL;
 
+CREATE TABLE IF NOT EXISTS logo_bank (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  content_hash CHAR(64) NOT NULL,
+  image_mime_type VARCHAR(100) NOT NULL,
+  image LONGBLOB NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  UNIQUE INDEX logo_bank_hash (content_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
 CREATE TABLE IF NOT EXISTS theme_assets (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
   file_name VARCHAR(255) NOT NULL,

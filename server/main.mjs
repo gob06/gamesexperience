@@ -1031,6 +1031,37 @@ app.post('/api/selfie/sessions/:id/close', requireUser, async (request, response
   response.status(204).end()
 })
 
+app.get('/api/logo-bank', requireUser, async (_request, response) => {
+  const rows = await database.prepare('SELECT id, name FROM logo_bank ORDER BY created_at DESC LIMIT 200').all()
+  response.set('Cache-Control', 'no-store').json({ logos: rows })
+})
+
+app.post('/api/logo-bank', requireUser, imageUpload.single('image'), async (request, response) => {
+  const { file } = request
+  if (!file || !hasValidImageSignature(file.mimetype, file.buffer)) {
+    return response.status(400).json({ error: 'Upload a valid JPEG, PNG, or WebP image.' })
+  }
+  const hash = createHash('sha256').update(file.buffer).digest('hex')
+  const existing = await database.prepare('SELECT id, name FROM logo_bank WHERE content_hash = ?').get(hash)
+  if (existing) return response.status(200).json(existing)
+  const id = randomUUID()
+  const name = String(request.body?.name || file.originalname || 'logo').slice(0, 120)
+  await database.prepare('INSERT INTO logo_bank (id, name, content_hash, image_mime_type, image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, name, hash, file.mimetype, file.buffer, new Date().toISOString())
+  response.status(201).json({ id, name })
+})
+
+app.get('/api/logo-bank/:id/image', requireUser, async (request, response) => {
+  const image = await database.prepare('SELECT image, image_mime_type AS mimeType FROM logo_bank WHERE id = ?').get(request.params.id)
+  if (!image) return response.status(404).end()
+  response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'private, max-age=3600').send(Buffer.from(image.image))
+})
+
+app.delete('/api/logo-bank/:id', requireUser, async (request, response) => {
+  await database.prepare('DELETE FROM logo_bank WHERE id = ?').run(request.params.id)
+  response.status(204).end()
+})
+
 app.get('/api/polls', requireUser, async (_request, response) => response.json(await listPolls()))
 
 app.get('/api/polls/:id', async (request, response) => {
