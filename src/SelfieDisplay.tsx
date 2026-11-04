@@ -95,6 +95,26 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
   const imageUrl = (id: string) => `/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/image`
   const slides = [...photos].sort((a, b) => (a.approvedAt || a.createdAt).localeCompare(b.approvedAt || b.createdAt))
   const current = slides.length ? slides[index % slides.length] : null
+  const currentId = current?.id ?? null
+  const [layers, setLayers] = useState<string[]>([])
+
+  // Preload the next photo, then fade it in over the previous one so the wall never goes blank.
+  useEffect(() => {
+    if (!currentId) { setLayers([]); return }
+    let active = true
+    const preload = new Image()
+    const show = () => {
+      if (!active) return
+      setLayers((value) => (value[value.length - 1] === currentId ? value : [...value.slice(-1), currentId]))
+    }
+    preload.onload = show
+    preload.onerror = show
+    preload.src = imageUrl(currentId)
+    // Never stay blank if the image is slow to load.
+    const fallback = window.setTimeout(show, 3000)
+    const trim = window.setTimeout(() => { if (active) setLayers((value) => value.slice(-1)) }, 4600)
+    return () => { active = false; window.clearTimeout(trim); window.clearTimeout(fallback) }
+  }, [currentId, sessionId])
 
   useEffect(() => {
     if (slides.length < 2 || paused) return
@@ -105,13 +125,14 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
   return (
     <main className="selfie-display">
       <section className="selfie-display-wall" aria-label="Live guest photos">
-        {!current ? (
+        {!layers.length ? (
           <p className="selfie-display-empty">{closed ? 'This selfie session has ended.' : error || 'Photos will appear here as guests send them.'}</p>
         ) : (
-          <div className="selfie-slide" key={current.id}>
-            <img className="selfie-slide-backdrop" src={imageUrl(current.id)} alt="" />
-            <img className="selfie-slide-photo" src={imageUrl(current.id)} alt="Guest photo" />
-          </div>
+          layers.map((id) => (
+            <div className="selfie-slide" key={id}>
+              <img className="selfie-slide-photo" src={imageUrl(id)} alt="Guest photo" />
+            </div>
+          ))
         )}
       </section>
       <aside className="selfie-display-qr">

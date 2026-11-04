@@ -1129,3 +1129,6 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 
 .selfie-session-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .selfie-paused-note { margin: 0 0 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255, 190, 70, 0.55); background: rgba(255, 190, 70, 0.14); color: #ffd58a; font-weight: 700; }
+
+.selfie-slide { animation: selfie-crossfade 1.2s ease-in-out both; background: #0d0b10; }
+@keyframes selfie-crossfade { from { opacity: 0; } to { opacity: 1; } }
