@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { getSelfieJoinUrl } from './SelfieCam'
 
-type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string }
+type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string; approvedAt?: string | null }
 
 export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: string; joinToken: string }) {
   const qrRef = useRef<HTMLCanvasElement>(null)
@@ -91,7 +91,7 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
   }, [])
 
   const imageUrl = (id: string) => `/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/image`
-  const slides = [...photos].reverse()
+  const slides = [...photos].sort((a, b) => (a.approvedAt || a.createdAt).localeCompare(b.approvedAt || b.createdAt))
   const current = slides.length ? slides[index % slides.length] : null
 
   useEffect(() => {

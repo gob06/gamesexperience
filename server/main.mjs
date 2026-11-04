@@ -985,7 +985,7 @@ app.get('/api/selfie/sessions/:id/submissions', requireUser, async (request, res
   const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
   if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
   const submissions = await database.prepare(`
-    SELECT id, file_name AS fileName, status, created_at AS createdAt
+    SELECT id, file_name AS fileName, status, created_at AS createdAt, approved_at AS approvedAt
     FROM selfie_submissions WHERE session_id = ? ORDER BY created_at DESC
   `).all(session.id)
   response.json({ submissions, expiresAt: session.expiresAt, closed: Boolean(session.closedAt) || Date.parse(session.expiresAt) <= Date.now() })
@@ -997,9 +997,9 @@ app.post('/api/selfie/sessions/:sessionId/submissions/:submissionId/approve', re
     return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
   }
   const result = await database.prepare(`
-    UPDATE selfie_submissions SET status = 'approved'
+    UPDATE selfie_submissions SET status = 'approved', approved_at = ?
     WHERE id = ? AND session_id = ? AND status = 'pending'
-  `).run(request.params.submissionId, session.id)
+  `).run(new Date().toISOString(), request.params.submissionId, session.id)
   if (result.changes === 0) return response.status(404).json({ error: 'This pending photo could not be found.' })
   response.status(204).end()
 })

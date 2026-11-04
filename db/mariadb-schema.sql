@@ -200,6 +200,8 @@ CREATE TABLE IF NOT EXISTS selfie_submissions (
   FOREIGN KEY (session_id) REFERENCES selfie_sessions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+ALTER TABLE selfie_submissions ADD COLUMN IF NOT EXISTS approved_at VARCHAR(32) NULL;
+
 CREATE TABLE IF NOT EXISTS theme_assets (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
   file_name VARCHAR(255) NOT NULL,
