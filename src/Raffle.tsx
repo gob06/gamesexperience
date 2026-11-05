@@ -272,8 +272,6 @@ export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
         ) : (
           <>
             {(raffle.logoUrl || assetUrls.logo) && <img className="raffle-event-logo" src={raffle.logoUrl || assetUrls.logo} alt="Event logo" />}
-            <span className="raffle-kicker">LUCKY DRAW ENTRY</span>
-            <h1>{raffle.title}</h1>
             {registered ? (
               <div className="raffle-success" role="status"><Check size={26} /><strong>Your ticket is registered.</strong><span>Good luck, {participantName.trim()}!</span></div>
             ) : raffle.registrationOpen ? (
