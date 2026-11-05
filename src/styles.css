@@ -1820,3 +1820,4 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .display-shell .display-heading h1, .theme-root .display-shell .display-heading h1 { display: block; text-wrap: balance; }
 .display-shell .display-question-first-line, .display-shell .display-question-second-line, .display-shell .display-question-second-line > span { display: inline; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: #fff; text-shadow: inherit; transform: none; animation: none; }
 .display-shell .display-question-second-line::before { content: ' '; }
+.display-shell .display-join p.display-scan { background: #fff; box-shadow: none; text-shadow: none; }
