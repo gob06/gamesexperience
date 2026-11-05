@@ -123,8 +123,11 @@ function hasValidImageSignature(mimeType, image) {
   return mimeType === 'image/webp' && signature.toString('ascii', 0, 4) === 'RIFF' && signature.toString('ascii', 8, 12) === 'WEBP'
 }
 
+const themeSkins = ['broadcast', 'classic']
+
 const defaultTheme = {
   eventTitle: 'VOTE',
+  skin: 'broadcast',
   assets: { logo: null, banner: null, background: null, votingBackground: null, resultsBackground: null, adminBackground: null },
   colors: { primary: '#f4cf51', secondary: '#ff657a', accent: '#68ceda', background: '#131317', text: '#f5f1ed' },
   background: { position: 'center', size: 'cover', repeat: 'no-repeat', opacity: 1, overlay: 0.35, borderRadius: 8, glow: 0.2 },
@@ -163,6 +166,7 @@ function getThemeConfig(json) {
   return {
     ...defaultTheme,
     ...parsed,
+    skin: themeSkins.includes(parsed.skin) ? parsed.skin : defaultTheme.skin,
     assets: { ...defaultTheme.assets, ...(parsed.assets || {}) },
     colors: { ...defaultTheme.colors, ...(parsed.colors || {}) },
     background: { ...defaultTheme.background, ...(parsed.background || {}) },
@@ -889,12 +893,16 @@ app.put('/api/admin/theme/draft', requireAdmin, async (request, response) => {
     return response.status(400).json({ error: 'Theme colors must be valid six-digit hex colors.' })
   }
   const background = config.background
+  if (!themeSkins.includes(config.skin)) {
+    return response.status(400).json({ error: 'Choose one of the available themes.' })
+  }
   if (!background || !['cover', 'contain', 'repeat'].includes(background.size) || !['center', 'top', 'bottom', 'left', 'right'].includes(background.position) || typeof background.opacity !== 'number' || background.opacity < 0 || background.opacity > 1 || typeof background.overlay !== 'number' || background.overlay < 0 || background.overlay > 0.9 || typeof background.borderRadius !== 'number' || background.borderRadius < 0 || background.borderRadius > 32 || typeof background.glow !== 'number' || background.glow < 0 || background.glow > 1) {
     return response.status(400).json({ error: 'Theme layout settings are invalid.' })
   }
 
   const normalized = {
     eventTitle: config.eventTitle.trim(),
+    skin: config.skin,
     assets: Object.fromEntries(assetKeys.map((key) => [key, config.assets[key]])),
     colors: Object.fromEntries(colorKeys.map((key) => [key, config.colors[key].toLowerCase()])),
     background: {
@@ -910,7 +918,7 @@ app.put('/api/admin/theme/draft', requireAdmin, async (request, response) => {
   const updatedAt = new Date().toISOString()
   await database.prepare('UPDATE theme_settings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = 1')
     .run(JSON.stringify(normalized), request.user.id, updatedAt)
-  await auditThemeChange(request.user, 'draft.save', { eventTitle: normalized.eventTitle })
+  await auditThemeChange(request.user, 'draft.save', { eventTitle: normalized.eventTitle, theme: normalized.skin })
   response.json({ draft: normalized, updatedAt })
 })
 

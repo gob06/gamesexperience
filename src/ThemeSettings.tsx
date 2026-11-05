@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type CSSProperties, type DragEvent } from 'react'
 import { ArrowLeft, Check, ImagePlus, Monitor, RotateCcw, Smartphone, Trash2, Upload } from 'lucide-react'
-import { DEFAULT_THEME, useTheme, type ThemeConfig } from './theme'
+import { DEFAULT_THEME, THEME_SKINS, useTheme, type ThemeConfig } from './theme'
 
 type ThemeAsset = { id: string; mimeType: string; sizeBytes: number; width: number; height: number; uploadedAt: string }
 type AuditEntry = { administrator: string; action: string; details: Record<string, string>; createdAt: string }
@@ -231,12 +231,27 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
         <a className="admin-back" href={scope === 'game' ? '/game' : '/'} onClick={(event) => { event.preventDefault(); onBack() }}><ArrowLeft size={15} /> {scope === 'game' ? 'Game rooms' : 'Dashboard'}</a>
       </header>
       <div className="theme-editor-content">
-        <div className="theme-editor-heading"><span className="auth-eyebrow">ADMINISTRATOR CONTROL</span><h1>{scope === 'game' ? 'Vanishing Tic-Tac-Toe Appearance' : 'Appearance &amp; Theme Settings'}</h1><p>{scope === 'game' ? 'Customize the game experience independently. Draft edits stay private until published and do not affect voting or the main site.' : 'Customize your event branding without changing the source code. Draft edits stay private until published.'}</p></div>
+        <div className="theme-editor-heading"><span className="auth-eyebrow">ADMINISTRATOR CONTROL</span><h1>{scope === 'game' ? 'Vanishing Tic-Tac-Toe Appearance' : 'Appearance & Theme Settings'}</h1><p>{scope === 'game' ? 'Customize the game experience independently. Draft edits stay private until published and do not affect voting or the main site.' : 'Customize your event branding without changing the source code. Draft edits stay private until published.'}</p></div>
         <div className="theme-editor-grid">
           <section className="theme-editor-panel">
             <label className="auth-field-label" htmlFor="theme-event-title">{scope === 'game' ? 'Game title' : 'Event title'}</label>
             <input id="theme-event-title" maxLength={80} value={draft.eventTitle} onChange={(event) => updateDraft((current) => ({ ...current, eventTitle: event.target.value }))} />
-            <h2 className="theme-section-title">{scope === 'game' ? 'Game branding &amp; backgrounds' : 'Branding &amp; backgrounds'}</h2>
+            {scope === 'site' && (
+              <>
+                <h2 className="theme-section-title">Website theme</h2>
+                <div className="theme-skin-grid" role="radiogroup" aria-label="Website theme">
+                  {THEME_SKINS.map((skin) => (
+                    <button key={skin.id} type="button" role="radio" aria-checked={draft.skin === skin.id} className={`theme-skin-card theme-skin-${skin.id} ${draft.skin === skin.id ? 'is-selected' : ''}`} onClick={() => updateDraft((current) => ({ ...current, skin: skin.id }))}>
+                      <span className="theme-skin-swatch" aria-hidden="true"><i /><i /><i /></span>
+                      <strong>{skin.name}{published.skin === skin.id ? ' Â· Live' : ''}</strong>
+                      <small>{skin.description}</small>
+                    </button>
+                  ))}
+                </div>
+                <p className="theme-upload-help">The theme changes the whole site skin for every page. Colors below fine-tune the Classic Dark theme.</p>
+              </>
+            )}
+            <h2 className="theme-section-title">{scope === 'game' ? 'Game branding & backgrounds' : 'Branding & backgrounds'}</h2>
             <div className="theme-image-grid">
               {imageFields.map(({ key, label: defaultLabel }) => {
                 const label = scope === 'game' ? gameImageLabels[key] || defaultLabel : defaultLabel
@@ -250,13 +265,13 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                       {assetId ? <img src={`/api/admin/theme/assets/${encodeURIComponent(assetId)}`} alt={`Preview: ${label}`} /> : <ImagePlus size={20} />}
                       <span>{assetId ? 'Replace image' : 'Drop an image here or browse'}</span>
                     </label>
-                    {asset && <small>{asset.width} × {asset.height} · {formatSize(asset.sizeBytes)}</small>}
+                    {asset && <small>{asset.width} Ã— {asset.height} Â· {formatSize(asset.sizeBytes)}</small>}
                     {assetId && <button type="button" className="theme-remove-image" onClick={() => updateDraft((current) => ({ ...current, assets: { ...current.assets, [key]: null } }))}>Remove from draft</button>}
                   </div>
                 )
               })}
             </div>
-            <p className="theme-upload-help">JPG, PNG, or WebP · maximum {formatSize(maxUploadBytes)} per image · 12,000 pixels per side · SVG and executable files are not accepted.</p>
+            <p className="theme-upload-help">JPG, PNG, or WebP Â· maximum {formatSize(maxUploadBytes)} per image Â· 12,000 pixels per side Â· SVG and executable files are not accepted.</p>
 
             <h2 className="theme-section-title">Colors</h2>
             <div className="theme-color-grid">
@@ -277,12 +292,12 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
           <aside className="theme-preview-column">
             <section className="theme-preview-panel">
               <div className="theme-preview-heading"><h2>Live preview</h2><div><button type="button" className={previewMode === 'desktop' ? 'is-active' : ''} onClick={() => setPreviewMode('desktop')} aria-label="Desktop preview"><Monitor size={16} /></button><button type="button" className={previewMode === 'mobile' ? 'is-active' : ''} onClick={() => setPreviewMode('mobile')} aria-label="Mobile preview"><Smartphone size={16} /></button></div></div>
-              <div className={`theme-preview-canvas ${previewMode}`} style={previewStyle}>
+              <div className={`theme-preview-canvas ${previewMode} ${scope === 'site' ? `skin-${draft.skin}` : ''}`} style={previewStyle}>
                 <header>{draft.assets.logo && <img src={`/api/admin/theme/assets/${encodeURIComponent(draft.assets.logo)}`} alt="" />}<strong>{draft.eventTitle || (scope === 'game' ? 'Game title' : 'Event title')}</strong></header>
                 {draft.assets.banner && <img className="theme-preview-banner" src={`/api/admin/theme/assets/${encodeURIComponent(draft.assets.banner)}`} alt={scope === 'game' ? 'Game banner' : 'Event banner'} />}
                 {scope === 'game' ? (
                   <>
-                    <small>QUICK MATCH · 2 PLAYERS</small><h3>Vanishing Tic-Tac-Toe</h3>
+                    <small>QUICK MATCH Â· 2 PLAYERS</small><h3>Vanishing Tic-Tac-Toe</h3>
                     <div className="game-theme-preview-board"><span>X</span><span /><span>O</span><span /><span>X</span><span /><span>O</span><span /><span /></div>
                     <button type="button">Your turn</button>
                   </>
@@ -294,16 +309,16 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                   </>
                 )}
               </div>
-              <div className="theme-publish-actions"><button className="button button-secondary" disabled={busy} onClick={() => void saveDraft()}><Check size={16} /> Save draft</button><button className="button button-primary" disabled={busy} onClick={() => void publishTheme()}>{busy ? 'Saving…' : scope === 'game' ? 'Publish game theme' : 'Publish theme'}</button><button className="theme-reset-button" disabled={busy} onClick={() => void resetTheme()}><RotateCcw size={15} /> Restore defaults</button></div>
+              <div className="theme-publish-actions"><button className="button button-secondary" disabled={busy} onClick={() => void saveDraft()}><Check size={16} /> Save draft</button><button className="button button-primary" disabled={busy} onClick={() => void publishTheme()}>{busy ? 'Savingâ€¦' : scope === 'game' ? 'Publish game theme' : 'Publish theme'}</button><button className="theme-reset-button" disabled={busy} onClick={() => void resetTheme()}><RotateCcw size={15} /> Restore defaults</button></div>
               <p className="theme-publish-state">Published title: <strong>{published.eventTitle}</strong></p>
             </section>
-            <section className="theme-preview-panel theme-assets-panel"><h2>Uploaded assets</h2>{assets.length ? assets.map((asset) => <div className="theme-asset-row" key={asset.id}><span>{asset.mimeType.replace('image/', '').toUpperCase()} · {formatSize(asset.sizeBytes)}</span><button type="button" disabled={busy} onClick={() => void deleteAsset(asset.id)} aria-label="Delete uploaded image"><Trash2 size={15} /></button></div>) : <p>No uploaded theme images.</p>}</section>
-            <section className="theme-preview-panel theme-assets-panel"><h2>Recent theme activity</h2>{audit.slice(0, 8).map((entry, index) => <div className="theme-audit-row" key={`${entry.createdAt}-${index}`}><strong>{entry.action.replace(scope === 'game' ? 'game-theme.' : '', '').replace('.', ' ')}</strong><span>{entry.administrator} · {new Date(entry.createdAt).toLocaleString()}</span></div>)}</section>
+            <section className="theme-preview-panel theme-assets-panel"><h2>Uploaded assets</h2>{assets.length ? assets.map((asset) => <div className="theme-asset-row" key={asset.id}><span>{asset.mimeType.replace('image/', '').toUpperCase()} Â· {formatSize(asset.sizeBytes)}</span><button type="button" disabled={busy} onClick={() => void deleteAsset(asset.id)} aria-label="Delete uploaded image"><Trash2 size={15} /></button></div>) : <p>No uploaded theme images.</p>}</section>
+            <section className="theme-preview-panel theme-assets-panel"><h2>Recent theme activity</h2>{audit.slice(0, 8).map((entry, index) => <div className="theme-audit-row" key={`${entry.createdAt}-${index}`}><strong>{entry.action.replace(scope === 'game' ? 'game-theme.' : '', '').replace('.', ' ')}</strong><span>{entry.administrator} Â· {new Date(entry.createdAt).toLocaleString()}</span></div>)}</section>
           </aside>
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}
         {notice && <p className="theme-success" role="status">{notice}</p>}
-        {busy && <p className="theme-busy" role="status"><Upload size={15} /> Uploading or saving changes…</p>}
+        {busy && <p className="theme-busy" role="status"><Upload size={15} /> Uploading or saving changesâ€¦</p>}
       </div>
     </main>
   )

@@ -1,7 +1,15 @@
 import { createContext, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 
+export type ThemeSkin = 'broadcast' | 'classic'
+
+export const THEME_SKINS: Array<{ id: ThemeSkin; name: string; description: string }> = [
+  { id: 'broadcast', name: 'Live Broadcast', description: 'Navy and electric blue with neon frames and chrome buttons, matching the live results screen.' },
+  { id: 'classic', name: 'Classic Dark', description: 'The original charcoal look with warm gold highlights.' },
+]
+
 export type ThemeConfig = {
   eventTitle: string
+  skin: ThemeSkin
   assets: {
     logo: string | null
     banner: string | null
@@ -30,6 +38,7 @@ export type ThemeConfig = {
 
 export const DEFAULT_THEME: ThemeConfig = {
   eventTitle: 'VOTE',
+  skin: 'broadcast',
   assets: { logo: null, banner: null, background: null, votingBackground: null, resultsBackground: null, adminBackground: null },
   colors: { primary: '#f4cf51', secondary: '#ff657a', accent: '#68ceda', background: '#131317', text: '#f5f1ed' },
   background: { position: 'center', size: 'cover', repeat: 'no-repeat', opacity: 1, overlay: 0.35, borderRadius: 8, glow: 0.2 },
@@ -58,7 +67,10 @@ function backgroundValue(url: string | undefined, opacity: number, overlay: numb
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState(DEFAULT_THEME)
+  const [theme, setTheme] = useState<ThemeConfig>(() => {
+    const cached = window.localStorage.getItem('theme-skin')
+    return { ...DEFAULT_THEME, skin: THEME_SKINS.some((skin) => skin.id === cached) ? cached as ThemeSkin : DEFAULT_THEME.skin }
+  })
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
 
   async function refreshTheme() {
@@ -66,6 +78,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (!response.ok) throw new Error('The published theme could not be loaded.')
     const result: { config: ThemeConfig; assetUrls: Record<string, string> } = await response.json()
     setTheme(result.config)
+    if (result.config.skin) window.localStorage.setItem('theme-skin', result.config.skin)
     setAssetUrls(result.assetUrls)
   }
 
@@ -102,9 +115,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     '--theme-banner-image': assetUrls.banner ? `url("${assetUrls.banner.replaceAll('"', '')}")` : 'none',
   }) as CSSProperties, [theme, assetUrls])
 
+  const rootClasses = [
+    'theme-root',
+    `skin-${theme.skin || 'broadcast'}`,
+    assetUrls.background ? 'bg-global' : '',
+    assetUrls.votingBackground || assetUrls.background ? 'bg-voting' : '',
+    assetUrls.adminBackground || assetUrls.background ? 'bg-admin' : '',
+  ].filter(Boolean).join(' ')
+
   return (
     <ThemeContext.Provider value={{ theme, assetUrls, refreshTheme }}>
-      <div className="theme-root" style={style}>
+      <div className={rootClasses} style={style}>
         {children}
       </div>
     </ThemeContext.Provider>
