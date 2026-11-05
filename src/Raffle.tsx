@@ -306,6 +306,26 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   const [rollingEntry, setRollingEntry] = useState<RaffleEntry | null>(null)
   const [winner, setWinner] = useState<RaffleEntry | null>(null)
   const [tab, setTab] = useState<RaffleTab>('qr')
+  const [presenting, setPresenting] = useState(false)
+
+  useEffect(() => {
+    if (!presenting) return
+    const exit = () => { if (!document.fullscreenElement) setPresenting(false) }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setPresenting(false) }
+    document.addEventListener('fullscreenchange', exit)
+    window.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('fullscreenchange', exit); window.removeEventListener('keydown', onKey) }
+  }, [presenting])
+
+  function present() {
+    setPresenting(true)
+    void document.documentElement.requestFullscreen?.().catch(() => undefined)
+  }
+
+  function stopPresenting() {
+    setPresenting(false)
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+  }
   const [title, setTitle] = useState('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState('')
@@ -512,6 +532,19 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
 
   const displayedEntry = isDrawing ? rollingEntry : winner || winners[0] || null
 
+  if (presenting && activeRaffle) {
+    return (
+      <div className="raffle-presentation">
+        <RaffleDisplayPage raffleId={activeRaffle.id} />
+        <div className="raffle-presentation-controls">
+          {isDrawing && <button className="button button-stop" onClick={() => void stopDraw()} disabled={busy}><Square size={16} fill="currentColor" /> STOP</button>}
+          {!isDrawing && eligible.length > 0 && <button className="button button-primary" onClick={() => void startDraw()} disabled={busy}><Play size={16} /> DRAW</button>}
+          <button className="button button-secondary" onClick={stopPresenting}><X size={16} /> Close</button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <main className="raffle-host-shell">
       <header className="topbar">
@@ -569,7 +602,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                 <div className="raffle-active-heading">
                   <div><span className="raffle-kicker">ACTIVE RAFFLE</span><h2>{activeRaffle.title}</h2></div>
                   <div className="raffle-heading-actions">
-                    <a className="button button-secondary raffle-display-link" href={`/raffle/${activeRaffle.id}/display`} target="_blank" rel="noreferrer"><MonitorPlay size={16} /> Open display</a>
+                    <button type="button" className="button button-secondary raffle-display-link" onClick={present}><MonitorPlay size={16} /> Open display</button>
                     <div className="raffle-counts"><span><strong>{entries.length}</strong> registered</span><span><strong>{winners.length}</strong> winners</span></div>
                   </div>
                 </div>
@@ -596,7 +629,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                       {displayedEntry ? <><strong>{displayedEntry.participantName}</strong><span className="raffle-ticket-result"><Ticket size={18} /> Ticket {displayedEntry.ticketNumber}</span></> : <p>{eligible.length ? 'Press DRAW to start the randomizer.' : 'Register tickets before drawing a winner.'}</p>}
                     </div>
                     <div className="raffle-draw-actions">
-                      {!isDrawing ? <button className="button button-primary raffle-draw-button" onClick={() => void startDraw()} disabled={busy || eligible.length === 0}><Play size={18} /> DRAW</button> : <button className="button button-stop raffle-draw-button" onClick={() => void stopDraw()} disabled={busy}><Square size={17} fill="currentColor" /> STOP</button>}
+                      {!isDrawing ? <button className="button button-primary raffle-draw-button" onClick={() => { present(); void startDraw() }} disabled={busy || eligible.length === 0}><Play size={18} /> DRAW</button> : <button className="button button-stop raffle-draw-button" onClick={() => void stopDraw()} disabled={busy}><Square size={17} fill="currentColor" /> STOP</button>}
                       <span>{eligible.length} eligible tickets · {winners.length} already won</span>
                     </div>
                     <p className="raffle-exclusion-note"><Check size={15} /> Each winning ticket is permanently excluded from future draws in this raffle.</p>
