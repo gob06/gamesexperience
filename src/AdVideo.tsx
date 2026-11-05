@@ -78,16 +78,34 @@ export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: ()
     return () => { document.body.style.overflow = previousOverflow }
   }, [url])
 
+  const [needsTap, setNeedsTap] = useState(false)
+
+  // iOS Safari blocks unmuted autoplay and may not preload video, so fall back to muted, then to a tap prompt.
   async function start() {
     const video = videoRef.current
-    if (!video) return
+    if (!video || !video.paused || video.ended) return
     try {
       await video.play()
     } catch {
       video.muted = true
+      try { await video.play() } catch { setNeedsTap(true) }
+    }
+  }
+
+  async function tapToPlay() {
+    const video = videoRef.current
+    if (!video) return
+    setNeedsTap(false)
+    video.muted = false
+    try { await video.play() } catch {
+      video.muted = true
       try { await video.play() } catch { finish.current() }
     }
   }
+
+  useEffect(() => {
+    if (url) void start()
+  }, [url])
 
   if (!url) return null
   return (
@@ -101,13 +119,16 @@ export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: ()
         disablePictureInPicture
         disableRemotePlayback
         controlsList="nodownload noplaybackrate noremoteplayback"
-        onLoadedData={() => void start()}
+        preload="auto"
+        onLoadedMetadata={() => void start()}
+        onCanPlay={() => void start()}
         onTimeUpdate={(event) => { if (!event.currentTarget.seeking) lastTime.current = event.currentTarget.currentTime }}
         onSeeking={(event) => { event.currentTarget.currentTime = lastTime.current }}
-        onPause={(event) => { if (!event.currentTarget.ended) void start() }}
+        onPause={(event) => { if (!event.currentTarget.ended && !needsTap) void start() }}
         onEnded={() => { markAudienceThankYouCompleted(); finish.current() }}
         onError={() => finish.current()}
       />
+      {needsTap && <button type="button" className="ad-video-tap" onClick={() => void tapToPlay()}>Tap to play</button>}
     </div>
   )
 }
