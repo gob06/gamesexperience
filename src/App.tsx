@@ -10,7 +10,6 @@ import {
   Download,
   FileText,
   Film,
-  Gamepad2,
   ImagePlus,
   LogIn,
   LogOut,
@@ -728,13 +727,6 @@ function ActivityDashboard({
             <strong>QR Voting</strong>
             <span className="activity-card-description">Create a poll, share its QR code, and watch results update live.</span>
             <span className="activity-card-action">Open voting dashboard <ArrowUpRight size={17} /></span>
-          </a>
-          <a className="activity-card game-activity" href="/game">
-            <span className="activity-card-icon"><Gamepad2 size={25} /></span>
-            <span className="activity-card-kicker">TWO-PLAYER MATCH</span>
-            <strong>Vanishing Tic-Tac-Toe</strong>
-            <span className="activity-card-description">Manage game rooms, customize X and O marks, and invite players by QR code.</span>
-            <span className="activity-card-action">{user.role === 'admin' ? 'Open game room management' : 'Admin-managed game rooms'} <ArrowUpRight size={17} /></span>
           </a>
           <a className="activity-card selfie-activity" href="/selfie">
             <span className="activity-card-icon"><Camera size={25} /></span>
