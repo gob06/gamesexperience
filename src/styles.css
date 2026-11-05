@@ -1838,3 +1838,5 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .display-shell .display-result-percent, .theme-root .display-shell .display-result-percent { flex: 0 0 auto; font-size: clamp(32px, 5.4vh, 68px); text-align: right; }
 .display-shell .display-meter { margin: clamp(8px, 1.4vh, 16px) 0 0; }
 .display-shell .display-result-body { justify-content: center; }
+.display-shell .display-result-label { font-size: min(100px, 6vw); }
+.display-shell .display-result-percent, .theme-root .display-shell .display-result-percent { font-size: min(100px, 6vw); }
