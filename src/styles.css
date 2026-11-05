@@ -1813,3 +1813,4 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-name, .raffle-screen-winner > strong { font-size: clamp(40px, min(8vw, 13vh), 150px); line-height: 1.1; }
 .raffle-screen-ticket { font-size: clamp(20px, min(3.4vw, 5vh), 60px); }
 .raffle-screen-draw-label { font-size: clamp(12px, 1.6vh, 18px); }
+.raffle-screen-name, .raffle-screen-winner > strong { font-size: min(200px, 12vw); }
