@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import QRCode from 'qrcode'
-import { ArrowLeft, ArrowUpRight, Check, Copy, ImagePlus, LogOut, MonitorPlay, Play, QrCode, Shuffle, Square, Ticket, Trash2, Trophy, X } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Check, Copy, ImagePlus, LogOut, MonitorPlay, Play, QrCode, Shuffle, Smartphone, Square, Ticket, Trash2, Trophy, X } from 'lucide-react'
 import { ThemeBrand, useTheme } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
@@ -190,7 +190,7 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
       ) : showQrOnly ? (
         <section className="raffle-screen-qr-only" aria-label="Raffle entry QR code">
             {shareUrl && data ? <RaffleQrCode value={shareUrl} logoUrl={eventLogoUrl} size={1024} label={`QR code to enter ${data.raffle.title}`} /> : <span>Loading QR…</span>}
-            <p className="raffle-screen-scan">SCAN QR TO REGISTER</p>
+            <p className="raffle-screen-scan"><Smartphone aria-hidden="true" />SCAN THE QR CODE FOR THE RAFFLE DRAW</p>
         </section>
       ) : (
         <section className={`raffle-screen-grid ${isDrawing ? 'is-drawing' : ''} ${winner ? 'has-winner' : ''}`}>
