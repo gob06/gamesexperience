@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowUpRight, Check, Copy, ImagePlus, LogOut, MonitorPlay, P
 import { ThemeBrand, useTheme } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
+import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 
 type Raffle = {
   id: string
@@ -436,6 +437,18 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     setError('')
     setLogoFile(file)
     setLogoPreview(URL.createObjectURL(file))
+    void saveLogo(file)
+  }
+
+  async function useSavedLogo(logo: SavedLogo) {
+    try {
+      const file = await logoToFile(logo)
+      setError('')
+      setLogoFile(file)
+      setLogoPreview(URL.createObjectURL(file))
+    } catch {
+      setError('Could not load that image from the image bank.')
+    }
   }
 
   async function startDraw() {
@@ -530,6 +543,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                 <button className="button button-secondary raffle-upload-button" type="button" onClick={() => logoInputRef.current?.click()}>{logoFile ? 'Change' : 'Upload'}</button>
                 {logoFile && <button className="icon-button" type="button" onClick={() => { setLogoFile(null); setLogoPreview(''); if (logoInputRef.current) logoInputRef.current.value = '' }} aria-label="Remove logo"><X size={15} /></button>}
               </div>
+              <SavedLogoPicker onSelect={(logo) => void useSavedLogo(logo)} />
               <p className="raffle-help">JPEG, PNG, or WebP · 5 MB maximum</p>
               <button className="button button-primary raffle-submit" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create raffle'} <ArrowUpRight size={16} /></button>
             </form>

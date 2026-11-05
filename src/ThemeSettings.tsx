@@ -243,7 +243,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                   {THEME_SKINS.map((skin) => (
                     <button key={skin.id} type="button" role="radio" aria-checked={draft.skin === skin.id} className={`theme-skin-card theme-skin-${skin.id} ${draft.skin === skin.id ? 'is-selected' : ''}`} onClick={() => updateDraft((current) => ({ ...current, skin: skin.id }))}>
                       <span className="theme-skin-swatch" aria-hidden="true"><i /><i /><i /></span>
-                      <strong>{skin.name}{published.skin === skin.id ? ' Â· Live' : ''}</strong>
+                      <strong>{skin.name}{published.skin === skin.id ? ' · Live' : ''}</strong>
                       <small>{skin.description}</small>
                     </button>
                   ))}
@@ -265,13 +265,13 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                       {assetId ? <img src={`/api/admin/theme/assets/${encodeURIComponent(assetId)}`} alt={`Preview: ${label}`} /> : <ImagePlus size={20} />}
                       <span>{assetId ? 'Replace image' : 'Drop an image here or browse'}</span>
                     </label>
-                    {asset && <small>{asset.width} Ã— {asset.height} Â· {formatSize(asset.sizeBytes)}</small>}
+                    {asset && <small>{asset.width} × {asset.height} · {formatSize(asset.sizeBytes)}</small>}
                     {assetId && <button type="button" className="theme-remove-image" onClick={() => updateDraft((current) => ({ ...current, assets: { ...current.assets, [key]: null } }))}>Remove from draft</button>}
                   </div>
                 )
               })}
             </div>
-            <p className="theme-upload-help">JPG, PNG, or WebP Â· maximum {formatSize(maxUploadBytes)} per image Â· 12,000 pixels per side Â· SVG and executable files are not accepted.</p>
+            <p className="theme-upload-help">JPG, PNG, or WebP · maximum {formatSize(maxUploadBytes)} per image · 12,000 pixels per side · SVG and executable files are not accepted.</p>
 
             <h2 className="theme-section-title">Colors</h2>
             <div className="theme-color-grid">
@@ -297,7 +297,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                 {draft.assets.banner && <img className="theme-preview-banner" src={`/api/admin/theme/assets/${encodeURIComponent(draft.assets.banner)}`} alt={scope === 'game' ? 'Game banner' : 'Event banner'} />}
                 {scope === 'game' ? (
                   <>
-                    <small>QUICK MATCH Â· 2 PLAYERS</small><h3>Vanishing Tic-Tac-Toe</h3>
+                    <small>QUICK MATCH · 2 PLAYERS</small><h3>Vanishing Tic-Tac-Toe</h3>
                     <div className="game-theme-preview-board"><span>X</span><span /><span>O</span><span /><span>X</span><span /><span>O</span><span /><span /></div>
                     <button type="button">Your turn</button>
                   </>
@@ -309,16 +309,16 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                   </>
                 )}
               </div>
-              <div className="theme-publish-actions"><button className="button button-secondary" disabled={busy} onClick={() => void saveDraft()}><Check size={16} /> Save draft</button><button className="button button-primary" disabled={busy} onClick={() => void publishTheme()}>{busy ? 'Savingâ€¦' : scope === 'game' ? 'Publish game theme' : 'Publish theme'}</button><button className="theme-reset-button" disabled={busy} onClick={() => void resetTheme()}><RotateCcw size={15} /> Restore defaults</button></div>
+              <div className="theme-publish-actions"><button className="button button-secondary" disabled={busy} onClick={() => void saveDraft()}><Check size={16} /> Save draft</button><button className="button button-primary" disabled={busy} onClick={() => void publishTheme()}>{busy ? 'Saving…' : scope === 'game' ? 'Publish game theme' : 'Publish theme'}</button><button className="theme-reset-button" disabled={busy} onClick={() => void resetTheme()}><RotateCcw size={15} /> Restore defaults</button></div>
               <p className="theme-publish-state">Published title: <strong>{published.eventTitle}</strong></p>
             </section>
-            <section className="theme-preview-panel theme-assets-panel"><h2>Uploaded assets</h2>{assets.length ? assets.map((asset) => <div className="theme-asset-row" key={asset.id}><span>{asset.mimeType.replace('image/', '').toUpperCase()} Â· {formatSize(asset.sizeBytes)}</span><button type="button" disabled={busy} onClick={() => void deleteAsset(asset.id)} aria-label="Delete uploaded image"><Trash2 size={15} /></button></div>) : <p>No uploaded theme images.</p>}</section>
-            <section className="theme-preview-panel theme-assets-panel"><h2>Recent theme activity</h2>{audit.slice(0, 8).map((entry, index) => <div className="theme-audit-row" key={`${entry.createdAt}-${index}`}><strong>{entry.action.replace(scope === 'game' ? 'game-theme.' : '', '').replace('.', ' ')}</strong><span>{entry.administrator} Â· {new Date(entry.createdAt).toLocaleString()}</span></div>)}</section>
+            <section className="theme-preview-panel theme-assets-panel"><h2>Uploaded assets</h2>{assets.length ? assets.map((asset) => <div className="theme-asset-row" key={asset.id}><span>{asset.mimeType.replace('image/', '').toUpperCase()} · {formatSize(asset.sizeBytes)}</span><button type="button" disabled={busy} onClick={() => void deleteAsset(asset.id)} aria-label="Delete uploaded image"><Trash2 size={15} /></button></div>) : <p>No uploaded theme images.</p>}</section>
+            <section className="theme-preview-panel theme-assets-panel"><h2>Recent theme activity</h2>{audit.slice(0, 8).map((entry, index) => <div className="theme-audit-row" key={`${entry.createdAt}-${index}`}><strong>{entry.action.replace(scope === 'game' ? 'game-theme.' : '', '').replace('.', ' ')}</strong><span>{entry.administrator} · {new Date(entry.createdAt).toLocaleString()}</span></div>)}</section>
           </aside>
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}
         {notice && <p className="theme-success" role="status">{notice}</p>}
-        {busy && <p className="theme-busy" role="status"><Upload size={15} /> Uploading or saving changesâ€¦</p>}
+        {busy && <p className="theme-busy" role="status"><Upload size={15} /> Uploading or saving changes…</p>}
       </div>
     </main>
   )
