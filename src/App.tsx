@@ -1132,7 +1132,7 @@ function VotePage({ pollId }: { pollId: string }) {
           <div className="vote-card not-found"><div className="empty-icon"><CircleHelp size={21} /></div><h1>Poll not found.</h1><p>{error}</p><p>Check the QR code and try again.</p></div>
         ) : poll ? (
           <section className="vote-card">
-            <div className="vote-card-kicker"><span className="live-indicator" /> LIVE POLL <span className="kicker-divider">/</span> {`${totalVotes} ${totalVotes === 1 ? 'VOTE' : 'VOTES'}`}</div>
+            <div className="vote-card-kicker"><span className="live-indicator" /> LIVE POLL</div>
             {poll.questionImageUrl && <img className="question-image" src={poll.questionImageUrl} alt={poll.question || 'Question'} />}
             {(poll.question || !poll.questionImageUrl) && <h1>{poll.question}</h1>}
             <p className="vote-instruction">{voted ? 'You have already voted. Thank you!' : !poll.votingEnabled ? 'Voting is currently closed. Check back soon.' : 'Choose one answer. Each voting session can vote once.'}</p>
@@ -1145,7 +1145,7 @@ function VotePage({ pollId }: { pollId: string }) {
                     <span className={`option-marker marker-${index % 4}`}>{String.fromCharCode(65 + index)}</span>
                     {option.imageUrl && <img className="vote-option-image" src={option.imageUrl} alt="" />}
                     <span className="vote-option-label">{option.label}</span>
-                    {voted ? <span className="vote-percent">{percent}% <small>{option.votes}</small></span> : <span className="radio-mark" />}
+                    {voted ? <span className="vote-percent">{percent}%</span> : <span className="radio-mark" />}
                   </button>
                 )
               })}
