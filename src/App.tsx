@@ -41,11 +41,10 @@ import { ThemeBrand } from './theme'
 import VanishingGame from './VanishingGame'
 import { RaffleDisplayPage, RaffleHostPage, RaffleJoinPage } from './Raffle'
 
-type PollOption = { id: string; label: string; votes: number; imageUrl?: string | null }
+type PollOption = { id: string; label: string; votes: number; imageUrl?: string | null; hideLabel?: boolean }
 type Poll = { id: string; question: string; joinTitle?: string | null; questionImageUrl?: string | null; options: PollOption[]; createdAt: string; logoUrl?: string | null; isQa: boolean; winnerName?: string; winnerTicketNumber?: string; winnerAnswer?: string; votingEnabled: boolean; videoEnabled: boolean; revealCorrect?: boolean; correctOptionId?: string | null; stats?: { participants: number; submissions: number; winners: number; nonWinners: number } }
 type AuthUser = { id: string; username: string; role: 'admin' | 'host' }
-type OptionContentMode = 'text' | 'text-image' | 'image'
-type OptionDraft = { label: string; imageFile: File | null; previewUrl: string; contentMode: OptionContentMode }
+type OptionDraft = { label: string; imageFile: File | null; previewUrl: string; hideName: boolean }
 
 function resultOptionColor(index: number, optionCount: number) {
   const hue = (14 + index * 360 / Math.max(optionCount, 1)) % 360
@@ -63,17 +62,13 @@ type GameRoomSummary = {
 
 function emptyOptionDrafts(): OptionDraft[] {
   return [
-    { label: '', imageFile: null, previewUrl: '', contentMode: 'text' },
-    { label: '', imageFile: null, previewUrl: '', contentMode: 'text' },
+    { label: '', imageFile: null, previewUrl: '', hideName: false },
+    { label: '', imageFile: null, previewUrl: '', hideName: false },
   ]
 }
 
 function isOptionComplete(option: OptionDraft) {
-  const hasLabel = Boolean(option.label.trim())
-  const hasImage = Boolean(option.imageFile)
-  if (option.contentMode === 'image') return hasImage
-  if (option.contentMode === 'text-image') return hasLabel && hasImage
-  return hasLabel
+  return Boolean(option.label.trim())
 }
 
 const pollPath = window.location.pathname.match(/^\/poll\/([^/]+)\/?$/)
@@ -361,13 +356,9 @@ function App() {
       setError('Upload a question image, or switch to text only.')
       return
     }
-    if (options.some((option) => option.contentMode !== 'text' && !isOptionComplete(option))) {
-      setError('Complete each image answer with the required text and image.')
-      return
-    }
     const cleanOptions = options.map((option, index) => ({
       ...option,
-      label: option.contentMode === 'image' ? '' : option.label.trim(),
+      label: option.label.trim(),
       isCorrect: isQaMode && index === correctOptionIndex,
     })).filter(isOptionComplete)
     if (cleanOptions.length < 2) {
@@ -382,8 +373,8 @@ function App() {
       formData.append('revealCorrect', String(isQaMode && revealCorrect))
       const optionImages: File[] = []
       formData.append('options', JSON.stringify(cleanOptions.map((option) => {
-        const imageIndex = option.contentMode !== 'text' && option.imageFile ? optionImages.push(option.imageFile) - 1 : null
-        return { label: option.label, imageIndex, isCorrect: option.isCorrect }
+        const imageIndex = option.imageFile ? optionImages.push(option.imageFile) - 1 : null
+        return { label: option.label, imageIndex, isCorrect: option.isCorrect, hideLabel: option.hideName }
       })))
       optionImages.forEach((image) => formData.append('optionImages', image))
       if (logoFile) formData.append('logo', logoFile)
@@ -564,36 +555,20 @@ function App() {
                 {options.map((option, index) => (
                   <div className="option-input-row" key={index}>
                     <span className={`option-marker marker-${index % 4}`}>{String.fromCharCode(65 + index)}</span>
-                    <select
-                      className="option-mode-select"
-                      aria-label={`Answer ${index + 1} format`}
-                      value={option.contentMode}
-                      onChange={(event) => setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? {
-                        ...item,
-                        contentMode: event.target.value as OptionContentMode,
-                        ...(event.target.value === 'image' ? { label: '' } : {}),
-                      } : item))}
-                    >
-                      <option value="text">Text</option>
-                      <option value="text-image">Text + image</option>
-                      <option value="image">Image only</option>
-                    </select>
-                    {option.contentMode !== 'image' && <input
+                    <input
                       aria-label={`Option ${index + 1}`}
                       value={option.label}
                       onChange={(event) => setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))}
                       placeholder={index === 0 ? 'First answer' : index === 1 ? 'Second answer' : `Option ${index + 1}`}
                       maxLength={80}
-                      required={option.contentMode === 'text-image'}
-                    />}
+                    />
                     {isQaMode && <label className="correct-answer-choice" title="Mark this as the correct answer"><input type="radio" name="correct-answer" checked={correctOptionIndex === index} onChange={() => setCorrectOptionIndex(index)} aria-label={`Mark option ${index + 1} as correct`} /><span>Correct</span></label>}
-                    {option.contentMode !== 'text' && <>
-                      <input ref={(element) => { optionImageInputRefs.current[index] = element }} className="option-image-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => selectOptionImage(index, event)} aria-label={`Choose an image for option ${index + 1}`} />
-                      <button className="option-image-picker" type="button" onClick={() => optionImageInputRefs.current[index]?.click()} aria-label={`${option.imageFile ? 'Change' : 'Add'} image for option ${index + 1}`} title={option.imageFile ? 'Change option image' : 'Add option image'}>
-                        {option.previewUrl ? <img src={option.previewUrl} alt="" /> : <ImagePlus size={17} />}
-                      </button>
-                      {option.imageFile && <button className="icon-button option-image-remove" type="button" onClick={() => removeOptionImage(index)} aria-label={`Remove image from option ${index + 1}`} title="Remove image"><X size={15} /></button>}
-                    </>}
+                    <input ref={(element) => { optionImageInputRefs.current[index] = element }} className="option-image-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => selectOptionImage(index, event)} aria-label={`Choose an image for option ${index + 1}`} />
+                    <button className="option-image-picker" type="button" onClick={() => optionImageInputRefs.current[index]?.click()} aria-label={`${option.imageFile ? 'Change' : 'Add'} image for option ${index + 1}`} title={option.imageFile ? 'Change option image' : 'Add option image'}>
+                      {option.previewUrl ? <img src={option.previewUrl} alt="" /> : <ImagePlus size={17} />}
+                    </button>
+                    {option.imageFile && <button className="icon-button option-image-remove" type="button" onClick={() => removeOptionImage(index)} aria-label={`Remove image from option ${index + 1}`} title="Remove image"><X size={15} /></button>}
+                    {!isQaMode && <label className="hide-name-choice" title="Don't show this name on the live results page"><input type="checkbox" checked={option.hideName} onChange={(event) => setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, hideName: event.target.checked } : item))} aria-label={`Hide option ${index + 1} name on live results`} /><span>Hide name on live results</span></label>}
                     {options.length > 2 && (
                       <button className="icon-button remove-option" type="button" aria-label={`Remove option ${index + 1}`} onClick={() => {
                         if (option.previewUrl) URL.revokeObjectURL(option.previewUrl)
@@ -605,7 +580,7 @@ function App() {
                   </div>
                 ))}
               </div>
-              {options.length < 10 && <button className="add-option" type="button" onClick={() => setOptions((current) => [...current, { label: '', imageFile: null, previewUrl: '', contentMode: 'text' }])}><Plus size={15} /> Add an option</button>}
+              {options.length < 10 && <button className="add-option" type="button" onClick={() => setOptions((current) => [...current, { label: '', imageFile: null, previewUrl: '', hideName: false }])}><Plus size={15} /> Add an option</button>}
               {isQaMode && <label className="reveal-correct-choice"><input type="checkbox" checked={revealCorrect} onChange={(event) => setRevealCorrect(event.target.checked)} /> Show the correct answer to participants who answer wrong</label>}
               {error && <p className="form-error" role="alert">{error}</p>}
               <button className="button button-primary create-button" type="submit" disabled={loading}>
@@ -1285,7 +1260,7 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
                     </div>}
                     <div className="display-result-body">
                       <div className="display-result-top">
-                        {option.label && <h2 className="display-result-label">{option.label}</h2>}
+                        {option.label && !option.hideLabel && <h2 className="display-result-label">{option.label}</h2>}
                         <span className="display-result-percent">{percent}<small>%</small></span>
                       </div>
                       <div className="display-meter"><span style={{ width: `${percent}%` }} /></div>

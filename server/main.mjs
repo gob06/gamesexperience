@@ -91,7 +91,7 @@ app.get('/api/network-addresses', (_request, response) => {
 const selectPoll = database.prepare("SELECT id, question, join_title AS joinTitle, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/logo') END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/question-image') END AS questionImageUrl FROM polls WHERE id = ?")
 const selectQaWinner = database.prepare('SELECT v.voter_id AS voterId, v.first_name AS firstName, v.ticket_number AS ticketNumber, o.label AS answer FROM poll_voters v JOIN poll_options o ON o.id = v.option_id WHERE v.poll_id = ? AND v.is_correct = 1 ORDER BY v.created_at, v.seq LIMIT 1')
 const selectQaStats = database.prepare('SELECT (SELECT COUNT(*) FROM poll_voting_sessions WHERE poll_id = ? AND ticket_key IS NOT NULL) AS participants, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND option_id IS NOT NULL) AS submissions, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND is_correct = 1) AS winners')
-const selectOptions = database.prepare("SELECT id, label, votes, CASE WHEN image IS NULL THEN NULL ELSE CONCAT('/api/poll-options/', id, '/image') END AS imageUrl FROM poll_options WHERE poll_id = ? ORDER BY `position`")
+const selectOptions = database.prepare("SELECT id, label, votes, hide_label AS hideLabel, CASE WHEN image IS NULL THEN NULL ELSE CONCAT('/api/poll-options/', id, '/image') END AS imageUrl FROM poll_options WHERE poll_id = ? ORDER BY `position`")
 
 // The correct answer, winners, and statistics are only included for signed-in hosts (admin = true); audience requests never see them.
 async function getPoll(id, { admin = false } = {}) {
@@ -1216,6 +1216,7 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
         label: typeof option.label === 'string' ? option.label.trim() : '',
         imageIndex: option.imageIndex === null ? null : Number.isInteger(option.imageIndex) ? option.imageIndex : -1,
         isCorrect: option.isCorrect === true,
+        hideLabel: option.hideLabel === true,
       }
     }).filter((option) => option.label || option.imageIndex !== null).slice(0, 10)
     : []
@@ -1254,10 +1255,10 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
   await inTransaction(async () => {
     await database.prepare('INSERT INTO polls (id, question, created_at,     logo_mime_type,     logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
               .run(poll.id, question, poll.createdAt, logoFile?.mimetype || null, logoFile?.buffer || null, Number(isQa), correctOptionId, questionImageFile?.mimetype || null, questionImageFile?.buffer || null, Number(isQa && request.body.revealCorrect === 'true'))
-    const insertOption = database.prepare('INSERT INTO poll_options (id, poll_id, label, `position`, votes, image_mime_type, image) VALUES (?, ?, ?, ?, 0, ?, ?)')
+    const insertOption = database.prepare('INSERT INTO poll_options (id, poll_id, label, `position`, votes, image_mime_type, image, hide_label) VALUES (?, ?, ?, ?, 0, ?, ?, ?)')
     for (const [index, option] of optionsWithIds.entries()) {
       const file = option.imageIndex === null ? null : optionFiles[option.imageIndex]
-      await insertOption.run(option.id, poll.id, option.label, index, file?.mimetype || null, file?.buffer || null)
+      await insertOption.run(option.id, poll.id, option.label, index, file?.mimetype || null, file?.buffer || null, Number(option.hideLabel === true))
     }
   })
   await audit(request, 'poll.create', 'poll', poll.id, { isQa })

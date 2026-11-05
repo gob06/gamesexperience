@@ -1842,3 +1842,5 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .display-shell .display-result-percent, .theme-root .display-shell .display-result-percent { font-size: min(100px, 6vw); }
 .display-shell .display-result-label { font-size: min(80px, 5vw); }
 .display-shell .display-result-percent, .theme-root .display-shell .display-result-percent { font-size: min(80px, 5vw); }
+.hide-name-choice { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 100%; margin: 2px 0 0 36px; color: #aaa1aa; font-size: 12px; cursor: pointer; }
+.hide-name-choice input { width: 15px; height: 15px; margin: 0; accent-color: #00d9ff; }
