@@ -1388,6 +1388,10 @@ function selectAdVideo(kind) {
   return database.prepare(`SELECT kind, file_name AS fileName, original_name AS originalName, mime_type AS mimeType, size, updated_at AS updatedAt FROM ${table} WHERE kind = ?`).get(kind)
 }
 
+async function selectAudienceAdVideo(kind) {
+  return (await selectAdVideo(kind)) || (kind === 'raffle' ? selectAdVideo('poll') : undefined)
+}
+
 function adVideoSummary(video) {
   return video
     ? { available: true, url: `/api/ad-videos/${video.kind}/file?v=${encodeURIComponent(video.updatedAt)}`, name: video.originalName, size: video.size, updatedAt: video.updatedAt }
@@ -1431,7 +1435,7 @@ app.delete('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, async
 })
 
 app.get('/api/ad-videos/:kind', requireAdVideoKind, async (request, response) => {
-  response.set('Cache-Control', 'no-store').json(adVideoSummary(await selectAdVideo(request.params.kind)))
+  response.set('Cache-Control', 'no-store').json(adVideoSummary(await selectAudienceAdVideo(request.params.kind)))
 })
 
 app.get('/api/ad-videos/:kind/file', requireAdVideoKind, async (request, response) => {
