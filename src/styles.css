@@ -1817,3 +1817,6 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-name, .raffle-screen-winner > strong { font-size: min(180px, 11vw); }
 .raffle-screen-ticket { font-size: min(100px, 6.5vw); }
 .raffle-screen-ticket { font-size: min(80px, 5.2vw); }
+.display-shell .display-heading h1, .theme-root .display-shell .display-heading h1 { display: block; text-wrap: balance; }
+.display-shell .display-question-first-line, .display-shell .display-question-second-line, .display-shell .display-question-second-line > span { display: inline; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: #fff; text-shadow: inherit; transform: none; animation: none; }
+.display-shell .display-question-second-line::before { content: ' '; }
