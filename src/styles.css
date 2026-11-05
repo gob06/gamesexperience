@@ -1840,3 +1840,5 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .display-shell .display-result-body { justify-content: center; }
 .display-shell .display-result-label { font-size: min(100px, 6vw); }
 .display-shell .display-result-percent, .theme-root .display-shell .display-result-percent { font-size: min(100px, 6vw); }
+.display-shell .display-result-label { font-size: min(80px, 5vw); }
+.display-shell .display-result-percent, .theme-root .display-shell .display-result-percent { font-size: min(80px, 5vw); }
