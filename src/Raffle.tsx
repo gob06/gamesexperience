@@ -159,12 +159,9 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
     }
     document.addEventListener('keydown', onKeyDown)
     document.addEventListener('dblclick', toggleFullscreen)
-    const enterFullscreen = () => { if (!document.fullscreenElement) void document.documentElement.requestFullscreen().catch(() => undefined) }
-    document.addEventListener('click', enterFullscreen, { once: true })
     return () => {
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('dblclick', toggleFullscreen)
-      document.removeEventListener('click', enterFullscreen)
     }
   }, [])
 
@@ -310,10 +307,6 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   const [winner, setWinner] = useState<RaffleEntry | null>(null)
   const [tab, setTab] = useState<RaffleTab>('qr')
 
-  function openDisplay() {
-    if (!activeRaffle) return
-    window.open(`/raffle/${encodeURIComponent(activeRaffle.id)}/display`, 'raffle-display', 'popup=yes,width=1920,height=1080')
-  }
   const [title, setTitle] = useState('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState('')
@@ -577,7 +570,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                 <div className="raffle-active-heading">
                   <div><span className="raffle-kicker">ACTIVE RAFFLE</span><h2>{activeRaffle.title}</h2></div>
                   <div className="raffle-heading-actions">
-                    <button type="button" className="button button-secondary raffle-display-link" onClick={openDisplay}><MonitorPlay size={16} /> Open display</button>
+                    <a className="button button-secondary raffle-display-link" href={`/raffle/${activeRaffle.id}/display`}><MonitorPlay size={16} /> Open display</a>
                     <div className="raffle-counts"><span><strong>{entries.length}</strong> registered</span><span><strong>{winners.length}</strong> winners</span></div>
                   </div>
                 </div>
