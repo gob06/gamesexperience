@@ -1822,3 +1822,11 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .display-shell .display-question-second-line::before { content: ' '; }
 .display-shell .display-join p.display-scan { background: #fff; box-shadow: none; text-shadow: none; }
 .selfie-display .selfie-display-qr p { background: #fff; box-shadow: none; text-shadow: none; }
+
+/* No chrome gradients: flat fills only */
+.display-shell::before, .display-shell::after, .selfie-display::before, .selfie-display::after { display: none; }
+.display-shell .display-result-brand::after { background: #00d9ff; filter: none; }
+.display-shell .display-question-second-line { animation: none; }
+.raffle-screen-qr-panel > p { background: #fff; }
+.theme-root.skin-broadcast .button-primary, .theme-root.skin-broadcast .button-primary:hover:not(:disabled) { background: #fff; box-shadow: none; }
+.theme-root.skin-broadcast .button-primary:hover:not(:disabled) { background: #00d9ff; }
