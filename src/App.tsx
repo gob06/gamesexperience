@@ -1289,7 +1289,6 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
                         <span className="display-result-percent">{percent}<small>%</small></span>
                       </div>
                       <div className="display-meter"><span style={{ width: `${percent}%` }} /></div>
-                      <div className="display-result-count">{option.votes.toLocaleString()} {option.votes === 1 ? 'VOTE' : 'VOTES'}</div>
                     </div>
                   </article>
                 )
