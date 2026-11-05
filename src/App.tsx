@@ -183,6 +183,7 @@ function App() {
   const [polls, setPolls] = useState<Poll[]>([])
   const [question, setQuestion] = useState('')
   const [options, setOptions] = useState<OptionDraft[]>(emptyOptionDrafts)
+  const [hideNames, setHideNames] = useState(false)
   const [correctOptionIndex, setCorrectOptionIndex] = useState<number | null>(null)
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreviewUrl, setLogoPreviewUrl] = useState('')
@@ -374,7 +375,7 @@ function App() {
       const optionImages: File[] = []
       formData.append('options', JSON.stringify(cleanOptions.map((option) => {
         const imageIndex = option.imageFile ? optionImages.push(option.imageFile) - 1 : null
-        return { label: option.label, imageIndex, isCorrect: option.isCorrect, hideLabel: option.hideName }
+        return { label: option.label, imageIndex, isCorrect: option.isCorrect, hideLabel: hideNames }
       })))
       optionImages.forEach((image) => formData.append('optionImages', image))
       if (logoFile) formData.append('logo', logoFile)
@@ -568,7 +569,6 @@ function App() {
                       {option.previewUrl ? <img src={option.previewUrl} alt="" /> : <ImagePlus size={17} />}
                     </button>
                     {option.imageFile && <button className="icon-button option-image-remove" type="button" onClick={() => removeOptionImage(index)} aria-label={`Remove image from option ${index + 1}`} title="Remove image"><X size={15} /></button>}
-                    {!isQaMode && <label className="hide-name-choice" title="Don't show this name on the live results page"><input type="checkbox" checked={option.hideName} onChange={(event) => setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, hideName: event.target.checked } : item))} aria-label={`Hide option ${index + 1} name on live results`} /><span>Hide name on live results</span></label>}
                     {options.length > 2 && (
                       <button className="icon-button remove-option" type="button" aria-label={`Remove option ${index + 1}`} onClick={() => {
                         if (option.previewUrl) URL.revokeObjectURL(option.previewUrl)
@@ -581,6 +581,7 @@ function App() {
                 ))}
               </div>
               {options.length < 10 && <button className="add-option" type="button" onClick={() => setOptions((current) => [...current, { label: '', imageFile: null, previewUrl: '', hideName: false }])}><Plus size={15} /> Add an option</button>}
+              {!isQaMode && <label className="hide-name-choice"><input type="checkbox" checked={hideNames} onChange={(event) => setHideNames(event.target.checked)} /><span>Hide names on live results page</span></label>}
               {isQaMode && <label className="reveal-correct-choice"><input type="checkbox" checked={revealCorrect} onChange={(event) => setRevealCorrect(event.target.checked)} /> Show the correct answer to participants who answer wrong</label>}
               {error && <p className="form-error" role="alert">{error}</p>}
               <button className="button button-primary create-button" type="submit" disabled={loading}>
