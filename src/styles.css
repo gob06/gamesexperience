@@ -1803,3 +1803,10 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .theme-root.skin-broadcast :is(.create-panel, .polls-panel) .poll-form { border: 0; box-shadow: none; background: transparent; }
 .theme-root.skin-broadcast :is(.poll-logo-field, .logo-preview-tile, .option-mode-select) { background: rgba(0,107,255,.16); border-color: rgba(0,217,255,.45); }
 .theme-root.skin-broadcast :is(.add-option, .option-add, .poll-form .button-quiet) { color: #00d9ff; }
+
+/* Raffle live screen: logo header, oversized name and ticket */
+.raffle-screen-main { gap: clamp(16px, 3vh, 40px); padding: clamp(16px, 2.5vw, 40px); }
+.raffle-screen-logo { display: block; flex: 0 0 auto; max-width: min(70%, 900px); max-height: 22vh; object-fit: contain; }
+.raffle-screen-grid.is-drawing .raffle-screen-draw, .raffle-screen-grid.has-winner .raffle-screen-winner { flex: 1 1 auto; width: 100%; min-height: 0; max-width: none; padding: clamp(16px, 3vw, 48px); }
+.raffle-screen-name, .raffle-screen-winner > strong { font-size: clamp(56px, min(13vw, 22vh), 260px); line-height: 1.02; text-wrap: balance; }
+.raffle-screen-ticket { font-size: clamp(28px, min(6vw, 9vh), 110px); }

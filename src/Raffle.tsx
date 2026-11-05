@@ -193,10 +193,7 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
       ) : (
         <section className={`raffle-screen-grid ${isDrawing ? 'is-drawing' : ''} ${winner ? 'has-winner' : ''}`}>
           <div className="raffle-screen-main" aria-live="polite">
-            <div className="raffle-screen-event">
-              <span className="raffle-screen-kicker">{isDrawing ? 'DRAW IN PROGRESS' : 'WINNING TICKET'}</span>
-              <h1>{data.raffle.title}</h1>
-            </div>
+            {eventLogoUrl && <img className="raffle-screen-logo" src={eventLogoUrl} alt="Event logo" />}
             {isDrawing ? (
               <div className="raffle-screen-draw">
                 <span className="raffle-screen-draw-label"><Shuffle size={20} /> RANDOMIZING</span>
@@ -205,7 +202,6 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
               </div>
             ) : winner && (
               <div className="raffle-screen-winner">
-                <span className="raffle-screen-winner-label"><Trophy size={22} /> LUCKY WINNER</span>
                 <strong>{winner.participantName}</strong>
                 <span className="raffle-screen-ticket">TICKET {winner.ticketNumber}</span>
               </div>
