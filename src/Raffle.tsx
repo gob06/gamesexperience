@@ -69,7 +69,8 @@ async function renderRaffleQr(canvas: HTMLCanvasElement, value: string, logoUrl:
   if (!logo.naturalWidth) return
   const context = canvas.getContext('2d')
   if (!context) return
-    const boxSize = Math.min(200, size)
+    const displayed = canvas.clientWidth || size
+  const boxSize = Math.min(Math.round(200 * size / displayed), Math.round(size * 0.3))
   const padding = Math.max(2, Math.round(boxSize * .025))
   const fitSize = boxSize - padding * 2
   const scale = Math.min(fitSize / logo.naturalWidth, fitSize / logo.naturalHeight)
@@ -86,10 +87,12 @@ function RaffleQrCode({ value, logoUrl, size = 1024, label }: { value: string; l
     const canvas = canvasRef.current
     if (!canvas || !value) return
     let active = true
-    void renderRaffleQr(canvas, value, logoUrl, size).then(() => {
-      if (!active) return
-    })
-    return () => { active = false }
+    let timer = 0
+    const draw = () => { void renderRaffleQr(canvas, value, logoUrl, size) }
+    draw()
+    const onResize = () => { window.clearTimeout(timer); timer = window.setTimeout(() => { if (active) draw() }, 150) }
+    window.addEventListener('resize', onResize)
+    return () => { active = false; window.clearTimeout(timer); window.removeEventListener('resize', onResize) }
   }, [value, logoUrl, size])
     return <canvas ref={canvasRef} aria-label={label} />
 }
