@@ -1857,3 +1857,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-qr-only .raffle-screen-scan svg { width: 1.05em; height: 1.05em; flex: 0 0 auto; stroke-width: 2.6; }
 
 .ad-video-tap { position: absolute; inset: 0; margin: auto; width: 180px; height: 60px; border: 0; border-radius: 30px; background: #fff; color: #050b35; font: 800 18px/1 system-ui, sans-serif; }
+
+.raffle-draw-stage { box-sizing: border-box; max-width: 100%; overflow: hidden; }
+.raffle-draw-stage > strong { max-width: 100%; font-size: clamp(22px, 4vw, 44px); line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.raffle-ticket-result { max-width: 100%; flex-wrap: wrap; justify-content: center; overflow-wrap: anywhere; }
