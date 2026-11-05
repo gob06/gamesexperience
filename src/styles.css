@@ -1830,3 +1830,11 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-qr-panel > p { background: #fff; }
 .theme-root.skin-broadcast .button-primary, .theme-root.skin-broadcast .button-primary:hover:not(:disabled) { background: #fff; box-shadow: none; }
 .theme-root.skin-broadcast .button-primary:hover:not(:disabled) { background: #00d9ff; }
+
+/* Result rows: option name top-left, percentage top-right, meter below */
+.display-shell .display-result.no-image, .theme-root .display-shell .display-result.no-image { grid-template-columns: minmax(0, 1fr); }
+.display-shell .display-result-top { display: flex; align-items: baseline; justify-content: space-between; gap: clamp(12px, 2vw, 32px); }
+.display-shell .display-result-label { flex: 1 1 auto; min-width: 0; margin: 0; color: #fff; font-family: 'Aptos Display', 'Arial Narrow', sans-serif; font-size: clamp(22px, 3.6vh, 46px); font-style: italic; font-weight: 900 !important; line-height: 1.05; text-align: left; text-transform: uppercase; text-shadow: 0 2px 0 rgba(5, 11, 53, .8), 0 0 12px rgba(0, 107, 255, .55); overflow-wrap: anywhere; }
+.display-shell .display-result-percent, .theme-root .display-shell .display-result-percent { flex: 0 0 auto; font-size: clamp(32px, 5.4vh, 68px); text-align: right; }
+.display-shell .display-meter { margin: clamp(8px, 1.4vh, 16px) 0 0; }
+.display-shell .display-result-body { justify-content: center; }

@@ -1279,13 +1279,13 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
                 const percent = totalVotes ? Math.round(option.votes / totalVotes * 100) : 0
                 const imageOnly = !option.label.trim() && Boolean(option.imageUrl)
                 return (
-                  <article className={`display-result result-tone-${index % 4} ${imageOnly ? 'display-result-image-only' : ''}`} key={option.id} style={{ '--result-tone': resultOptionColor(index, poll.options.length) } as CSSProperties}>
-                    <div className="display-result-brand">
-                      {option.imageUrl && <span className="display-result-image"><img src={option.imageUrl} alt="" /></span>}
-                      {option.label && <h2>{option.label}</h2>}
-                    </div>
+                  <article className={`display-result result-tone-${index % 4} ${option.imageUrl ? 'has-image' : 'no-image'} ${imageOnly ? 'display-result-image-only' : ''}`} key={option.id} style={{ '--result-tone': resultOptionColor(index, poll.options.length) } as CSSProperties}>
+                    {option.imageUrl && <div className="display-result-brand">
+                      <span className="display-result-image"><img src={option.imageUrl} alt="" /></span>
+                    </div>}
                     <div className="display-result-body">
                       <div className="display-result-top">
+                        {option.label && <h2 className="display-result-label">{option.label}</h2>}
                         <span className="display-result-percent">{percent}<small>%</small></span>
                       </div>
                       <div className="display-meter"><span style={{ width: `${percent}%` }} /></div>
