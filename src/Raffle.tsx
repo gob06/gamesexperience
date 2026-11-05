@@ -198,7 +198,6 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
             {eventLogoUrl && <img className="raffle-screen-logo" src={eventLogoUrl} alt="Event logo" />}
             {isDrawing ? (
               <div className="raffle-screen-draw">
-                <span className="raffle-screen-draw-label"><Shuffle size={20} /> RANDOMIZING</span>
                 <strong key={rollingEntry?.id || 'empty'} className="raffle-screen-name">{rollingEntry?.participantName || 'Waiting for eligible tickets…'}</strong>
                 {rollingEntry && <span className="raffle-screen-ticket">TICKET {rollingEntry.ticketNumber}</span>}
               </div>
