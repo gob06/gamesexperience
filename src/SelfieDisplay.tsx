@@ -138,7 +138,7 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
       </section>
       <aside className="selfie-display-qr">
         <div className="selfie-qr-frame"><canvas ref={qrRef} aria-label="Scan to share your selfie" /></div>
-        <p><Smartphone aria-hidden="true" />SCAN TO SHARE YOUR SELFIE!</p>
+        <p><Smartphone aria-hidden="true" />SCAN TO SHARE YOUR SELFIE</p>
       </aside>
     </main>
   )
