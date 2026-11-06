@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Film, LogOut, Trash2, Upload } from 'lucide-react'
 import { ThemeBrand } from './theme'
 
 export type AdVideoKind = 'poll' | 'qa' | 'game' | 'selfie' | 'raffle'
-type AdVideoInfo = { available: boolean; url?: string; name?: string; size?: number; updatedAt?: string }
+type AdVideoInfo = { available: boolean; url?: string; mimeType?: string; name?: string; size?: number; updatedAt?: string }
 const thankYouKey = `games-experience:thank-you:${window.location.pathname}`
 
 export function hasAudienceThankYouCompleted() {
@@ -50,11 +51,139 @@ const kindLabels: Record<AdVideoKind, { title: string; description: string }> = 
   raffle: { title: 'QR Raffle video', description: 'Plays full-screen on a ticket holder’s phone after they register for a raffle.' },
 }
 
-// Full-screen video that cannot be skipped, seeked, paused, or closed; it closes itself when playback ends or fails.
-export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: () => void }) {
-  const [url, setUrl] = useState('')
-  const videoRef = useRef<HTMLVideoElement>(null)
+export function AdVideoPlayer({ url, mimeType = 'video/mp4', expectedSize, videoRef: providedRef, onEnded, onContinue }: {
+  url: string
+  mimeType?: string
+  expectedSize?: number
+  videoRef?: RefObject<HTMLVideoElement>
+  onEnded: () => void
+  onContinue?: () => void
+}) {
+  const ownRef = useRef<HTMLVideoElement>(null)
+  const videoRef = providedRef ?? ownRef
+  const [blobUrl, setBlobUrl] = useState('')
+  const [attempt, setAttempt] = useState(0)
+  const [needsTap, setNeedsTap] = useState(false)
+  const [loadingFallback, setLoadingFallback] = useState(false)
+  const [failure, setFailure] = useState('')
+  const download = useRef<AbortController | null>(null)
+  const pendingPlay = useRef<HTMLVideoElement | null>(null)
   const lastTime = useRef(0)
+
+  useEffect(() => () => download.current?.abort(), [])
+  useEffect(() => () => { if (blobUrl) URL.revokeObjectURL(blobUrl) }, [blobUrl])
+
+  async function recoverFromError(video: HTMLVideoElement) {
+    if (video !== videoRef.current || download.current || failure) return
+    const detail = `Video error ${video.error?.code ?? 4} (${blobUrl ? 'downloaded copy' : 'direct'})`
+    if (blobUrl) {
+      setFailure(`${detail}. This device could not decode the video. Upload an MP4 encoded as H.264 with AAC audio.`)
+      return
+    }
+    // Keep repeated native error events from cancelling an in-flight recovery.
+    const controller = new AbortController()
+    download.current = controller
+    video.pause()
+    setLoadingFallback(true)
+    setNeedsTap(false)
+    try {
+      const response = await fetch(url, { signal: controller.signal, cache: 'reload' })
+      if (!response.ok) throw new Error(`Video download returned HTTP ${response.status}.`)
+      const contentType = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
+      if (contentType && !contentType.startsWith('video/') && contentType !== 'application/octet-stream') {
+        throw new Error(`The server returned ${contentType}, not a video.`)
+      }
+      const blob = await response.blob()
+      if (!blob.size || (expectedSize !== undefined && blob.size !== expectedSize)) {
+        throw new Error(`Incomplete video download: ${blob.size}/${expectedSize ?? 'unknown'} bytes.`)
+      }
+      if (!controller.signal.aborted) {
+        lastTime.current = 0
+        setBlobUrl(URL.createObjectURL(blob.type === mimeType ? blob : blob.slice(0, blob.size, mimeType)))
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setFailure(`${detail}. ${error instanceof Error ? error.message : 'Video download failed.'}`)
+    } finally {
+      if (download.current === controller) {
+        download.current = null
+        setLoadingFallback(false)
+      }
+    }
+  }
+
+  async function start() {
+    const video = videoRef.current
+    if (!video || !video.paused || video.ended || failure || download.current || pendingPlay.current === video) return
+    pendingPlay.current = video
+    try {
+      video.muted = false
+      await video.play()
+      if (video === videoRef.current) setNeedsTap(false)
+    } catch (error) {
+      if (video !== videoRef.current) return
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        setNeedsTap(true)
+      } else {
+        void recoverFromError(video)
+      }
+    } finally {
+      if (pendingPlay.current === video) pendingPlay.current = null
+    }
+  }
+
+  useEffect(() => {
+    void start()
+  }, [url, blobUrl, attempt])
+
+  function retry() {
+    setFailure('')
+    setNeedsTap(true)
+    setBlobUrl('')
+    lastTime.current = 0
+    setAttempt((value) => value + 1)
+  }
+
+  return (
+    <>
+      <video
+        key={`${attempt}:${blobUrl || url}`}
+        ref={videoRef}
+        className="ad-video-player"
+        src={blobUrl || url}
+        autoPlay
+        muted={false}
+        playsInline
+        disablePictureInPicture
+        disableRemotePlayback
+        controlsList="nodownload noplaybackrate noremoteplayback"
+        preload="auto"
+        onCanPlay={() => void start()}
+        onPlaying={() => setNeedsTap(false)}
+        onTimeUpdate={(event) => { if (!event.currentTarget.seeking) lastTime.current = event.currentTarget.currentTime }}
+        onSeeking={(event) => { if (Math.abs(event.currentTarget.currentTime - lastTime.current) > 1.5) event.currentTarget.currentTime = lastTime.current }}
+        onPause={(event) => { if (!event.currentTarget.ended && !needsTap && !event.currentTarget.error) void start() }}
+        onEnded={onEnded}
+        onError={(event) => void recoverFromError(event.currentTarget)}
+      />
+      {loadingFallback && <p className="ad-video-loading">Loading video…</p>}
+      {failure && (
+        <div className="ad-message" role="alert">
+          <p>The video could not be played.</p>
+          <small>{failure}</small>
+          <button className="button button-secondary" type="button" onClick={retry}>Try again</button>
+          {onContinue && <button className="button button-secondary" type="button" onClick={onContinue}>Continue</button>}
+        </div>
+      )}
+      {!failure && !loadingFallback && needsTap && <button type="button" className="ad-video-tap" onClick={() => void start()}>Tap to play</button>}
+    </>
+  )
+}
+
+export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: () => void }) {
+  const [info, setInfo] = useState<AdVideoInfo | null>(null)
+  const [failure, setFailure] = useState('')
+  const [attempt, setAttempt] = useState(0)
   const finish = useRef(onDone)
   finish.current = onDone
 
@@ -62,74 +191,30 @@ export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: ()
     let active = true
     fetch(`/api/ad-videos/${kind}`)
       .then(async (response) => {
+        if (!response.ok) throw new Error(`Could not load the advertisement (HTTP ${response.status}).`)
         const result = await response.json() as AdVideoInfo
         if (!active) return
-        if (response.ok && result.available && result.url) setUrl(result.url)
-        else finish.current()
+        if (!result.available) finish.current()
+        else if (result.url) setInfo(result)
+        else throw new Error('The advertisement has no video URL.')
       })
-      .catch(() => { if (active) finish.current() })
+      .catch((error) => { if (active) setFailure(error instanceof Error ? error.message : 'Could not load the advertisement.') })
     return () => { active = false }
-  }, [kind])
+  }, [kind, attempt])
 
   useEffect(() => {
-    if (!url) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = previousOverflow }
-  }, [url])
+  }, [])
 
-  const [needsTap, setNeedsTap] = useState(false)
-
-  // iOS Safari blocks unmuted autoplay and may not preload video, so fall back to muted, then to a tap prompt.
-  async function start() {
-    const video = videoRef.current
-    if (!video || !video.paused || video.ended) return
-    try {
-      await video.play()
-    } catch {
-      video.muted = true
-      try { await video.play() } catch { setNeedsTap(true) }
-    }
-  }
-
-  async function tapToPlay() {
-    const video = videoRef.current
-    if (!video) return
-    setNeedsTap(false)
-    video.muted = false
-    try { await video.play() } catch {
-      video.muted = true
-      try { await video.play() } catch { finish.current() }
-    }
-  }
-
-  useEffect(() => {
-    if (url) void start()
-  }, [url])
-
-  if (!url) return null
-  return (
+  return createPortal(
     <div className="ad-video-overlay" role="dialog" aria-modal="true" aria-label="Sponsored video" onContextMenu={(event) => event.preventDefault()}>
-      <video
-        ref={videoRef}
-        className="ad-video-player"
-        src={url}
-        autoPlay
-        playsInline
-        disablePictureInPicture
-        disableRemotePlayback
-        controlsList="nodownload noplaybackrate noremoteplayback"
-        preload="auto"
-        onLoadedMetadata={() => void start()}
-        onCanPlay={() => void start()}
-        onTimeUpdate={(event) => { if (!event.currentTarget.seeking) lastTime.current = event.currentTarget.currentTime }}
-        onSeeking={(event) => { event.currentTarget.currentTime = lastTime.current }}
-        onPause={(event) => { if (!event.currentTarget.ended && !needsTap) void start() }}
-        onEnded={() => { markAudienceThankYouCompleted(); finish.current() }}
-        onError={() => finish.current()}
-      />
-      {needsTap && <button type="button" className="ad-video-tap" onClick={() => void tapToPlay()}>Tap to play</button>}
-    </div>
+      {info?.url && <AdVideoPlayer key={info.url} url={info.url} mimeType={info.mimeType} expectedSize={info.size} onEnded={() => { markAudienceThankYouCompleted(); finish.current() }} onContinue={() => finish.current()} />}
+      {!info && !failure && <p className="ad-video-loading">Loading video…</p>}
+      {failure && <div className="ad-message" role="alert"><p>{failure}</p><button className="button button-secondary" type="button" onClick={() => { setFailure(''); setAttempt((value) => value + 1) }}>Try again</button></div>}
+    </div>,
+    document.body,
   )
 }
 
@@ -194,7 +279,7 @@ function AdVideoSlot({ kind, info, maxBytes, onChange }: { kind: AdVideoKind; in
       <p className="auth-hint">{description}</p>
       {info.available && info.url ? (
         <>
-          <video className="ad-video-preview" src={info.url} controls preload="metadata" />
+          <video className="ad-video-preview" src={info.url} controls playsInline preload="metadata" />
           <p className="auth-hint">{info.name} · {formatSize(info.size ?? 0)}</p>
         </>
       ) : <p className="auth-hint">No video uploaded. Nothing will play for this activity.</p>}

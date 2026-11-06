@@ -892,7 +892,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
   .game-player-chip { gap: 5px; padding: 8px 6px; font-size: 11px; }
   .vanishing-board { gap: 6px; padding: 8px; }
 }
-.ad-video-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; user-select: none; }
+.ad-video-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100vh; height: 100dvh; z-index: 10000; display: flex; align-items: center; justify-content: center; background: #000; touch-action: none; -webkit-user-select: none; user-select: none; }
 .ad-video-player { width: 100%; height: 100%; object-fit: contain; background: #000; pointer-events: none; }
 .ad-video-player::-webkit-media-controls { display: none !important; }
 .audience-thank-you-shell { position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center; overflow-y: auto; padding: 24px; color: #f7f3f5; background: radial-gradient(ellipse at 50% 35%, #29232b 0, #151418 67%); }
@@ -1804,8 +1804,10 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .theme-root.skin-broadcast :is(.poll-logo-field, .logo-preview-tile, .option-mode-select) { background: rgba(0,107,255,.16); border-color: rgba(0,217,255,.45); }
 .theme-root.skin-broadcast :is(.add-option, .option-add, .poll-form .button-quiet) { color: #00d9ff; }
 
-/* Raffle live screen: logo header, oversized name and ticket */
+/* Raffle live screen: event header, oversized name and ticket */
 .raffle-screen-main { gap: clamp(16px, 3vh, 40px); padding: clamp(16px, 2.5vw, 40px); }
+.raffle-screen-main .raffle-screen-event { flex: 0 0 auto; max-width: 100%; }
+.raffle-screen-main .raffle-screen-event h1 { display: -webkit-box; max-height: none; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 150px; }
 .raffle-screen-logo { display: block; flex: 0 0 auto; width: 760px; height: 300px; max-width: 100%; border: 0; border-radius: 0; background: transparent; object-fit: contain; }
 .raffle-screen-grid.is-drawing .raffle-screen-draw, .raffle-screen-grid.has-winner .raffle-screen-winner { flex: 1 1 auto; width: 100%; min-height: 0; max-width: none; padding: clamp(16px, 3vw, 48px); }
 .raffle-screen-name, .raffle-screen-winner > strong { font-size: clamp(56px, min(13vw, 22vh), 260px); line-height: 1.02; text-wrap: balance; }
@@ -1856,7 +1858,8 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 }
 .raffle-screen-qr-only .raffle-screen-scan svg { width: 1.05em; height: 1.05em; flex: 0 0 auto; stroke-width: 2.6; }
 
-.ad-video-tap { position: absolute; inset: 0; margin: auto; width: 180px; height: 60px; border: 0; border-radius: 30px; background: #fff; color: #050b35; font: 800 18px/1 system-ui, sans-serif; }
+.ad-video-tap { position: absolute; top: 50%; left: 50%; margin: -30px 0 0 -90px; width: 180px; height: 60px; border: 0; border-radius: 30px; background: #fff; color: #050b35; font: 800 18px/1 system-ui, sans-serif; }
+.ad-video-loading { position: absolute; left: 0; right: 0; bottom: 24px; margin: 0; text-align: center; color: #fff; font: 600 15px/1.4 system-ui, sans-serif; }
 
 .raffle-draw-stage { box-sizing: border-box; max-width: 100%; overflow: hidden; }
 .raffle-draw-stage > strong { max-width: 100%; font-size: clamp(22px, 4vw, 44px); line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -1866,3 +1869,12 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-grid.is-drawing .raffle-screen-draw, .raffle-screen-grid.has-winner .raffle-screen-winner { box-sizing: border-box; overflow: hidden; min-width: 0; }
 .raffle-screen-name, .raffle-screen-winner > strong { max-width: 100%; font-size: min(180px, 11vw, 15vh); line-height: 1.08; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .raffle-screen-ticket { max-width: 100%; font-size: min(80px, 5.2vw, 7vh); overflow-wrap: anywhere; text-align: center; }
+
+.raffle-screen-stage { flex: 1 1 auto; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.raffle-screen-grid .raffle-screen-stage > .raffle-screen-draw, .raffle-screen-grid .raffle-screen-stage > .raffle-screen-winner { flex: 1 1 auto; width: 100%; min-width: 0; align-self: stretch; }
+.raffle-screen-side-image { height: clamp(64px, 14vh, 170px); width: auto; max-width: 100%; object-fit: contain; border-radius: 12px; }
+.raffle-screen-side-image.is-left { grid-column: 1; justify-self: start; }
+.raffle-screen-side-image.is-right { grid-column: 3; justify-self: end; }
+.raffle-screen-event:has(.raffle-screen-side-image) { width: 100%; grid-template-columns: minmax(0, 18vw) minmax(0, 1fr) minmax(0, 18vw); align-items: center; }
+.raffle-screen-event:has(.raffle-screen-side-image) h1 { grid-column: 2; grid-row: 1; }
+.raffle-screen-side-image { grid-row: 1; }

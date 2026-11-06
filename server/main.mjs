@@ -1394,7 +1394,7 @@ async function selectAudienceAdVideo(kind) {
 
 function adVideoSummary(video) {
   return video
-    ? { available: true, url: `/api/ad-videos/${video.kind}/file?v=${encodeURIComponent(video.updatedAt)}`, name: video.originalName, size: video.size, updatedAt: video.updatedAt }
+    ? { available: true, url: `/api/ad-videos/${video.kind}/file?v=${encodeURIComponent(video.updatedAt)}`, mimeType: video.mimeType, name: video.originalName, size: video.size, updatedAt: video.updatedAt }
     : { available: false }
 }
 

@@ -9,7 +9,9 @@ const registrationLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.
 
 const selectRaffle = database => database.prepare(`
   SELECT id, title, draw_status AS drawStatus, created_at AS createdAt,
-    CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/logo?version=2') END AS logoUrl
+    CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/logo?version=2') END AS logoUrl,
+    CASE WHEN display_image_1 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/1?version=1') END AS displayImage1Url,
+    CASE WHEN display_image_2 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/2?version=1') END AS displayImage2Url
   FROM raffle_sessions
   WHERE id = ?
 `)
@@ -35,18 +37,31 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     response.json(raffles)
   })
 
-  app.post('/api/raffles', requireUser, imageUpload.single('logo'), async (request, response) => {
+  const createUpload = imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'displayImage1', maxCount: 1 }, { name: 'displayImage2', maxCount: 1 }])
+
+  app.post('/api/raffles', requireUser, createUpload, async (request, response) => {
     const title = typeof request.body.title === 'string' ? request.body.title.trim() : ''
     if (title.length < 3 || title.length > 120) return response.status(400).json({ error: 'Raffle title must be between 3 and 120 characters.' })
-    if (request.file && !hasValidImageSignature(request.file.mimetype, request.file.buffer)) {
-      return response.status(400).json({ error: 'The QR logo is not a valid JPEG, PNG, or WebP image.' })
+    const logo = request.files?.logo?.[0]
+    const displayImage1 = request.files?.displayImage1?.[0]
+    const displayImage2 = request.files?.displayImage2?.[0]
+    for (const [file, label] of [[logo, 'QR logo'], [displayImage1, 'Display image 1'], [displayImage2, 'Display image 2']]) {
+      if (file && !hasValidImageSignature(file.mimetype, file.buffer)) {
+        return response.status(400).json({ error: `${label} is not a valid JPEG, PNG, or WebP image.` })
+      }
     }
 
     const raffle = { id: randomUUID(), title, createdAt: new Date().toISOString() }
     await database.prepare(`
-      INSERT INTO raffle_sessions (id, title, logo_mime_type, logo, draw_status, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'idle', ?, ?, ?)
-    `).run(raffle.id, title, request.file?.mimetype || null, request.file?.buffer || null, request.user.id, raffle.createdAt, raffle.createdAt)
+      INSERT INTO raffle_sessions (id, title, logo_mime_type, logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, draw_status, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+    `).run(
+      raffle.id, title,
+      logo?.mimetype || null, logo?.buffer || null,
+      displayImage1?.mimetype || null, displayImage1?.buffer || null,
+      displayImage2?.mimetype || null, displayImage2?.buffer || null,
+      request.user.id, raffle.createdAt, raffle.createdAt,
+    )
     await audit(request, 'raffle.create', 'raffle', raffle.id, { title })
     response.status(201).json(await getRaffle.get(raffle.id))
   })
@@ -63,6 +78,14 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     const logo = await database.prepare('SELECT logo_mime_type AS mimeType, logo FROM raffle_sessions WHERE id = ?').get(request.params.id)
     if (!logo?.logo) return response.status(404).end()
     response.type(logo.mimeType).set('Cache-Control', 'no-store').send(Buffer.from(logo.logo))
+  })
+
+  app.get('/api/raffles/:id/display-image/:slot', async (request, response) => {
+    const slot = request.params.slot
+    if (slot !== '1' && slot !== '2') return response.status(404).end()
+    const image = await database.prepare(`SELECT display_image_${slot}_mime_type AS mimeType, display_image_${slot} AS image FROM raffle_sessions WHERE id = ?`).get(request.params.id)
+    if (!image?.image) return response.status(404).end()
+    response.type(image.mimeType).set('Cache-Control', 'no-store').send(Buffer.from(image.image))
   })
 
   app.get('/api/raffles/:id', async (request, response) => {

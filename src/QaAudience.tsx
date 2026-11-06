@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check } from 'lucide-react'
 import { ThemeBrand } from './theme'
 import { TermsNotice } from './terms'
-import { ThankYouScreen } from './AdVideo'
+import { AdVideoPlayer, ThankYouScreen } from './AdVideo'
 
 export type QaPoll = {
   id: string
@@ -25,11 +26,9 @@ async function postJson<T>(url: string, body?: unknown): Promise<{ ok: boolean; 
 function QaAdPlayer({ pollId, onCompleted }: { pollId: string; onCompleted: () => void }) {
   const base = `/api/polls/${encodeURIComponent(pollId)}/ad`
   const videoRef = useRef<HTMLVideoElement>(null)
-  const lastTime = useRef(0)
   const done = useRef(onCompleted)
   done.current = onCompleted
   const [url, setUrl] = useState('')
-  const [needsTap, setNeedsTap] = useState(false)
   const [message, setMessage] = useState('Loading your advertisement…')
   const [attempt, setAttempt] = useState(0)
 
@@ -56,18 +55,6 @@ function QaAdPlayer({ pollId, onCompleted }: { pollId: string; onCompleted: () =
     return () => { document.body.style.overflow = previousOverflow; window.clearInterval(timer) }
   }, [url, base])
 
-  const play = useCallback(async () => {
-    const video = videoRef.current
-    if (!video) return
-    try {
-      await video.play()
-      setNeedsTap(false)
-    } catch {
-      video.muted = true
-      try { await video.play(); setNeedsTap(false) } catch { setNeedsTap(true) }
-    }
-  }, [])
-
   const complete = useCallback(async (remainingRetries = 6) => {
     const video = videoRef.current
     try {
@@ -84,34 +71,19 @@ function QaAdPlayer({ pollId, onCompleted }: { pollId: string; onCompleted: () =
     }
   }, [base])
 
-  return (
+  return createPortal(
     <div className="ad-video-overlay" role="dialog" aria-modal="true" aria-label="Sponsored video" onContextMenu={(event) => event.preventDefault()}>
       {url && (
-        <video
-          ref={videoRef}
-          className="ad-video-player"
-          src={url}
-          autoPlay
-          playsInline
-          disablePictureInPicture
-          disableRemotePlayback
-          controlsList="nodownload noplaybackrate noremoteplayback"
-          onLoadedData={() => void play()}
-          onTimeUpdate={(event) => { if (!event.currentTarget.seeking) lastTime.current = event.currentTarget.currentTime }}
-          onSeeking={(event) => { event.currentTarget.currentTime = lastTime.current }}
-          onPause={(event) => { if (!event.currentTarget.ended) void play() }}
-          onEnded={() => void complete()}
-          onError={() => setMessage('The video could not be played.')}
-        />
+        <AdVideoPlayer key={`${attempt}:${url}`} url={url} videoRef={videoRef} onEnded={() => void complete()} />
       )}
-      {needsTap && <button className="button button-primary ad-tap-button" type="button" onClick={() => void play()}>Tap to play your video</button>}
       {message && (
         <div className="ad-message" role="status">
           <p>{message}</p>
           {url || /could not|lost|confirm/i.test(message) ? <button className="button button-secondary" type="button" onClick={() => { setMessage('Loading your advertisement…'); setAttempt((value) => value + 1) }}>Try again</button> : null}
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   )
 }
 

@@ -10,6 +10,8 @@ type Raffle = {
   id: string
   title: string
   logoUrl: string | null
+  displayImage1Url?: string | null
+  displayImage2Url?: string | null
   createdAt: string
   drawStatus: 'idle' | 'drawing'
   entryCount?: number
@@ -33,6 +35,40 @@ type HostRaffleData = {
 }
 
 type RaffleTab = 'qr' | 'draw' | 'winners'
+
+function DisplayImagePicker({ label, file, onChange, onError }: { label: string; file: File | null; onChange: (file: File | null) => void; onError: (message: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [preview, setPreview] = useState('')
+
+  useEffect(() => {
+    if (!file) { setPreview(''); return }
+    const url = URL.createObjectURL(file)
+    setPreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  function choose(event: ChangeEvent<HTMLInputElement>) {
+    const selected = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!selected) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(selected.type)) return onError(`Choose a JPEG, PNG, or WebP image for ${label.toLowerCase()}.`)
+    if (selected.size > 5 * 1024 * 1024) return onError(`${label} must be 5 MB or smaller.`)
+    onError('')
+    onChange(selected)
+  }
+
+  return (
+    <>
+      <input ref={inputRef} className="raffle-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={choose} aria-label={`Upload ${label.toLowerCase()}`} />
+      <div className="raffle-logo-row">
+        <span className="raffle-logo-preview">{preview ? <img src={preview} alt={`${label} preview`} /> : <ImagePlus size={19} />}</span>
+        <span className="raffle-logo-name">{file?.name || `${label} · optional`}</span>
+        <button className="button button-secondary raffle-upload-button" type="button" onClick={() => inputRef.current?.click()}>{file ? 'Change' : 'Upload'}</button>
+        {file && <button className="icon-button" type="button" onClick={() => onChange(null)} aria-label={`Remove ${label.toLowerCase()}`}><X size={15} /></button>}
+      </div>
+    </>
+  )
+}
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -195,18 +231,24 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
       ) : (
         <section className={`raffle-screen-grid ${isDrawing ? 'is-drawing' : ''} ${winner ? 'has-winner' : ''}`}>
           <div className="raffle-screen-main" aria-live="polite">
-            {eventLogoUrl && <img className="raffle-screen-logo" src={eventLogoUrl} alt="Event logo" />}
-            {isDrawing ? (
-              <div className="raffle-screen-draw">
-                <strong key={rollingEntry?.id || 'empty'} className="raffle-screen-name">{rollingEntry?.participantName || 'Waiting for eligible tickets…'}</strong>
-                {rollingEntry && <span className="raffle-screen-ticket">TICKET {rollingEntry.ticketNumber}</span>}
-              </div>
-            ) : winner && (
-              <div className="raffle-screen-winner">
-                <strong>{winner.participantName}</strong>
-                <span className="raffle-screen-ticket">TICKET {winner.ticketNumber}</span>
-              </div>
-            )}
+            <header className="raffle-screen-event">
+              {data.raffle.displayImage1Url && <img className="raffle-screen-side-image is-left" src={data.raffle.displayImage1Url} alt="" />}
+              <h1>{data.raffle.title}</h1>
+              {data.raffle.displayImage2Url && <img className="raffle-screen-side-image is-right" src={data.raffle.displayImage2Url} alt="" />}
+            </header>
+            <div className="raffle-screen-stage">
+              {isDrawing ? (
+                <div className="raffle-screen-draw">
+                  <strong key={rollingEntry?.id || 'empty'} className="raffle-screen-name">{rollingEntry?.participantName || 'Waiting for eligible tickets…'}</strong>
+                  {rollingEntry && <span className="raffle-screen-ticket">TICKET {rollingEntry.ticketNumber}</span>}
+                </div>
+              ) : winner && (
+                <div className="raffle-screen-winner">
+                  <strong>{winner.participantName}</strong>
+                  <span className="raffle-screen-ticket">TICKET {winner.ticketNumber}</span>
+                </div>
+              )}
+            </div>
           </div>
         </section>
       )}
@@ -310,6 +352,8 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   const [title, setTitle] = useState('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState('')
+  const [displayImage1, setDisplayImage1] = useState<File | null>(null)
+  const [displayImage2, setDisplayImage2] = useState<File | null>(null)
   const [shareUrl, setShareUrl] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -387,6 +431,8 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     const data = new FormData()
     data.append('title', title.trim())
     if (logoFile) data.append('logo', logoFile)
+    if (displayImage1) data.append('displayImage1', displayImage1)
+    if (displayImage2) data.append('displayImage2', displayImage2)
     try {
       const created = await requestJson<Raffle>('/api/raffles', { method: 'POST', body: data })
       setRaffles((current) => [created, ...current])
@@ -394,6 +440,8 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
       setTitle('')
       setLogoFile(null)
       setLogoPreview('')
+      setDisplayImage1(null)
+      setDisplayImage2(null)
       if (logoInputRef.current) logoInputRef.current.value = ''
       setTab('qr')
       setNotice('Raffle QR is ready to share.')
@@ -545,6 +593,9 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                 {logoFile && <button className="icon-button" type="button" onClick={() => { setLogoFile(null); setLogoPreview(''); if (logoInputRef.current) logoInputRef.current.value = '' }} aria-label="Remove logo"><X size={15} /></button>}
               </div>
               <SavedLogoPicker onSelect={(logo) => void useSavedLogo(logo)} />
+              <p className="raffle-help">Live randomizing screen images · shown left and right of the raffle name</p>
+              <DisplayImagePicker label="Display image 1" file={displayImage1} onChange={setDisplayImage1} onError={setError} />
+              <DisplayImagePicker label="Display image 2" file={displayImage2} onChange={setDisplayImage2} onError={setError} />
               <p className="raffle-help">JPEG, PNG, or WebP · 5 MB maximum</p>
               <button className="button button-primary raffle-submit" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create raffle'} <ArrowUpRight size={16} /></button>
             </form>

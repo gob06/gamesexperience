@@ -270,6 +270,11 @@ CREATE TABLE IF NOT EXISTS raffle_sessions (
   FOREIGN KEY (created_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_1_mime_type VARCHAR(100) NULL;
+ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_1 LONGBLOB NULL;
+ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_2_mime_type VARCHAR(100) NULL;
+ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_2 LONGBLOB NULL;
+
 CREATE TABLE IF NOT EXISTS raffle_entries (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
   raffle_id VARCHAR(64) NOT NULL,
