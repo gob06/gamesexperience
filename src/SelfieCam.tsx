@@ -1,10 +1,22 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import QRCode from 'qrcode'
 import { ArrowLeft, Camera, Check, Copy, ImagePlus, Maximize, Minimize, Pause, Play, QrCode, Trash2, Upload, X } from 'lucide-react'
 import { ThemeBrand } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
+
+function SantaLoadError({ onError }: { onError: () => void }) {
+  const errorCallback = useRef(onError)
+  errorCallback.current = onError
+  useEffect(() => { errorCallback.current() }, [])
+  return <></>
+}
+
+const SantaOverlay = lazy(() => import('./SantaOverlay').catch((error: unknown) => {
+  console.error('Could not load the 3D Santa renderer:', error)
+  return { default: SantaLoadError }
+}))
 
 type SelfieSession = { id: string; joinToken: string; displayToken: string; expiresAt: string }
 type SelfieSubmission = { id: string; fileName: string; status: 'pending' | 'approved'; createdAt: string }
@@ -106,12 +118,12 @@ export default function SelfieCam() {
     void saveLogo(file)
   }
 
-  async function createSession() {
+  async function createSession(santaEnabled = false) {
     setLoading(true)
     setError('')
     setNotice('')
     try {
-      const response = await fetch('/api/selfie/sessions', { method: 'POST' })
+      const response = await fetch('/api/selfie/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ santaEnabled }) })
       const result = await response.json() as SelfieSession & { error?: string }
       if (!response.ok || !result.id || !result.joinToken || !result.displayToken) throw new Error(result.error || 'Could not create a selfie session. Update and restart the server, then try again.')
       if (bannerFile) {
@@ -383,9 +395,15 @@ export default function SelfieCam() {
 export function SelfieParticipant({ token }: { token: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const santaRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const previewUrlRef = useRef('')
   const [cameraActive, setCameraActive] = useState(false)
+  const [withSanta, setWithSanta] = useState(false)
+  const [santaEnabled, setSantaEnabled] = useState(false)
+  const santaModeRef = useRef<boolean | null>(null)
+  const [santaReady, setSantaReady] = useState(false)
+  const [videoSize, setVideoSize] = useState({ width: 4, height: 3 })
   const [photo, setPhoto] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -396,12 +414,23 @@ export function SelfieParticipant({ token }: { token: string }) {
 
   useEffect(() => {
     let active = true
+    santaModeRef.current = null
+    setSantaEnabled(false)
+    setWithSanta(false)
     async function check() {
       try {
         const response = await fetch(`/api/selfie/join/${encodeURIComponent(token)}/status`, { cache: 'no-store' })
         if (!response.ok) return
-        const result = await response.json() as { paused?: boolean }
-        if (active) setUploadsPaused(Boolean(result.paused))
+        const result = await response.json() as { paused?: boolean; santaEnabled?: boolean }
+        if (active) {
+          setUploadsPaused(Boolean(result.paused))
+          const enabled = result.santaEnabled === true
+          setSantaEnabled(enabled)
+          if (santaModeRef.current !== enabled) {
+            santaModeRef.current = enabled
+            setWithSanta(enabled)
+          }
+        }
       } catch { /* Keep the last known state. */ }
     }
     void check()
@@ -414,6 +443,7 @@ export function SelfieParticipant({ token }: { token: string }) {
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     setCameraActive(false)
+    setSantaReady(false)
   }
 
   function selectPhoto(file: File) {
@@ -448,7 +478,7 @@ export function SelfieParticipant({ token }: { token: string }) {
   async function startCamera() {
     setError('')
     if (!navigator.mediaDevices?.getUserMedia) {
-      // Without HTTPS the live preview is blocked, but the capture input still opens the phone's camera app.
+      setError('Live camera effects require HTTPS and camera access. You can still choose a photo without Santa.')
       fileInputRef.current?.click()
       return
     }
@@ -479,6 +509,17 @@ export function SelfieParticipant({ token }: { token: string }) {
     context.translate(canvas.width, 0)
     context.scale(-1, 1)
     context.drawImage(video, 0, 0, canvas.width, canvas.height)
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    if (withSanta) {
+      const santa = santaRef.current
+      if (!santaReady || !santa) {
+        setError('Santa is still loading. Please try again or turn off the Santa effect.')
+        return
+      }
+      const height = Math.min(canvas.height * 0.85, canvas.width * 0.48 * 2)
+      const width = height / 2
+      context.drawImage(santa, canvas.width * 0.97 - width, canvas.height - height, width, height)
+    }
     canvas.toBlob((blob) => {
       if (!blob) {
         setError('Could not create the photo. Try again.')
@@ -488,6 +529,9 @@ export function SelfieParticipant({ token }: { token: string }) {
       stopCamera()
     }, 'image/jpeg', 0.88)
   }
+
+  const santaHeight = Math.min(0.85, 0.96 * videoSize.width / videoSize.height)
+  const santaWidth = santaHeight * videoSize.height / videoSize.width / 2
 
   async function submitPhoto() {
     if (!photo || submitting) return
@@ -525,7 +569,18 @@ export function SelfieParticipant({ token }: { token: string }) {
             if (file) selectPhoto(file)
           }} aria-label="Choose or capture a selfie" />
           {cameraActive ? (
-            <div className="selfie-camera"><video ref={videoRef} autoPlay playsInline muted aria-label="Camera preview" /><div className="selfie-controls"><button className="button button-secondary" type="button" onClick={stopCamera}><X size={16} /> Cancel</button><button className="button button-primary" type="button" onClick={takePhoto}><Camera size={16} /> Take photo</button></div></div>
+            <div className="selfie-camera">
+              <div className="selfie-camera-frame" style={{ aspectRatio: `${videoSize.width} / ${videoSize.height}`, width: `min(100%, 520px, ${65 * videoSize.width / videoSize.height}vh)` }}>
+                <video ref={videoRef} autoPlay playsInline muted aria-label="Camera preview" onLoadedMetadata={(event) => {
+                  const video = event.currentTarget
+                  if (video.videoWidth && video.videoHeight) setVideoSize({ width: video.videoWidth, height: video.videoHeight })
+                }} />
+                {withSanta && <Suspense fallback={null}><SantaOverlay canvasRef={santaRef} width={santaWidth} height={santaHeight} onReady={() => setSantaReady(true)} onError={() => { setSantaReady(false); setError('Could not load 3D Santa. Turn off the Santa effect to take a regular selfie.') }} /></Suspense>}
+              </div>
+              {santaEnabled && <label className="selfie-santa-choice"><input type="checkbox" checked={withSanta} onChange={(event) => { setWithSanta(event.target.checked); setSantaReady(false); setError('') }} /> Take a selfie with 3D Santa</label>}
+              {withSanta && !santaReady && !error && <p className="selfie-santa-loading" role="status">Loading 3D Santa…</p>}
+              <div className="selfie-controls"><button className="button button-secondary" type="button" onClick={stopCamera}><X size={16} /> Cancel</button><button className="button button-primary" type="button" onClick={takePhoto} disabled={withSanta && !santaReady}><Camera size={16} /> Take photo</button></div>
+            </div>
           ) : previewUrl ? (
             <>
               <div className="selfie-photo-preview"><img src={previewUrl} alt="Your photo preview" /></div>

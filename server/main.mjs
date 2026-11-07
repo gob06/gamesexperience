@@ -973,15 +973,48 @@ app.post('/api/selfie/sessions/:id/pause', requireUser, async (request, response
   response.json({ paused: Boolean(paused) })
 })
 
+app.get('/api/admin/selfie/sessions', requireAdmin, async (_request, response) => {
+  const now = new Date().toISOString()
+  const sessions = await database.prepare(`
+    SELECT sess.id, u.username AS host, sess.created_at AS createdAt, sess.expires_at AS expiresAt,
+      sess.paused, sess.santa_enabled AS santaEnabled
+    FROM selfie_sessions sess JOIN users u ON u.id = sess.owner_user_id
+    WHERE sess.closed_at IS NULL AND sess.expires_at > ? ORDER BY sess.created_at DESC
+  `).all(now)
+  const photos = await database.prepare(`
+    SELECT sub.id, sub.session_id AS sessionId, sub.status, sub.created_at AS createdAt, sub.approved_at AS approvedAt
+    FROM selfie_submissions sub JOIN selfie_sessions sess ON sess.id = sub.session_id
+    WHERE sess.closed_at IS NULL AND sess.expires_at > ? ORDER BY sub.created_at DESC
+  `).all(now)
+  response.set('Cache-Control', 'no-store').json({
+    sessions: sessions.map((session) => ({
+      ...session, paused: Boolean(session.paused), santaEnabled: Boolean(session.santaEnabled),
+      photos: photos.filter((photo) => photo.sessionId === session.id),
+    })),
+  })
+})
+
+app.get('/api/admin/selfie/sessions/:sessionId/photos/:photoId/image', requireAdmin, async (request, response) => {
+  const photo = await database.prepare(`
+    SELECT sub.image, sub.image_mime_type AS mimeType
+    FROM selfie_submissions sub JOIN selfie_sessions sess ON sess.id = sub.session_id
+    WHERE sub.id = ? AND sub.session_id = ? AND sess.closed_at IS NULL AND sess.expires_at > ?
+  `).get(request.params.photoId, request.params.sessionId, new Date().toISOString())
+  if (!photo) return response.status(404).json({ error: 'This active session photo could not be found.' })
+  response.type(photo.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(photo.image))
+})
+
 app.get('/api/selfie/join/:token/status', async (request, response) => {
   const token = request.params.token
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).end()
-  const row = await database.prepare('SELECT paused, expires_at AS expiresAt, closed_at AS closedAt FROM selfie_sessions WHERE join_token_hash = ?').get(hashSessionToken(token))
+  const row = await database.prepare('SELECT paused, santa_enabled AS santaEnabled, expires_at AS expiresAt, closed_at AS closedAt FROM selfie_sessions WHERE join_token_hash = ?').get(hashSessionToken(token))
   if (!row || row.closedAt || Date.parse(row.expiresAt) <= Date.now()) return response.status(404).end()
-  response.set('Cache-Control', 'no-store').json({ paused: Boolean(row.paused) })
+  response.set('Cache-Control', 'no-store').json({ paused: Boolean(row.paused), santaEnabled: Boolean(row.santaEnabled) })
 })
 
 app.post('/api/selfie/sessions', requireUser, async (request, response) => {
+  const santaEnabled = request.body?.santaEnabled ?? false
+  if (typeof santaEnabled !== 'boolean') return response.status(400).json({ error: 'Santa effect must be enabled or disabled.' })
   const now = new Date()
   await database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(now.toISOString())
   const sessionId = randomUUID()
@@ -989,10 +1022,10 @@ app.post('/api/selfie/sessions', requireUser, async (request, response) => {
   const displayToken = randomBytes(32).toString('base64url')
   const expiresAt = new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString()
   await database.prepare(`
-    INSERT INTO selfie_sessions (id, join_token_hash, display_token_hash, owner_user_id, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(sessionId, hashSessionToken(joinToken), hashSessionToken(displayToken), request.user.id, now.toISOString(), expiresAt)
-  response.status(201).json({ id: sessionId, joinToken, displayToken, expiresAt })
+    INSERT INTO selfie_sessions (id, join_token_hash, display_token_hash, owner_user_id, created_at, expires_at, santa_enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(sessionId, hashSessionToken(joinToken), hashSessionToken(displayToken), request.user.id, now.toISOString(), expiresAt, Number(santaEnabled))
+  response.status(201).json({ id: sessionId, joinToken, displayToken, expiresAt, santaEnabled })
 })
 
 app.post('/api/selfie/sessions/:id/banner', requireUser, imageUpload.single('image'), async (request, response) => {

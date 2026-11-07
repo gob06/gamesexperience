@@ -693,7 +693,21 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .selfie-controls .button-primary { color: #17171b; background: var(--theme-primary, #f4cf51); }
 .selfie-controls .button-secondary { border: 1px solid #ffffff26; color: #e6e2eb; background: #25242d; }
 .selfie-camera { display: grid; justify-items: center; }
-.selfie-camera video { width: min(100%, 520px); max-height: 65vh; aspect-ratio: 4 / 3; border-radius: 10px; background: #101015; object-fit: contain; transform: scaleX(-1); }
+.selfie-camera-frame { position: relative; overflow: hidden; border-radius: 10px; background: #101015; }
+.selfie-camera-frame video { display: block; width: 100%; height: 100%; object-fit: fill; transform: scaleX(-1); }
+.selfie-santa { position: absolute; right: 3%; bottom: 0; object-fit: contain; pointer-events: none; }
+.selfie-santa-choice { display: flex; align-items: center; gap: 8px; margin-top: 16px; color: #f5f1ed; cursor: pointer; }
+.selfie-santa-choice input { width: 18px; height: 18px; accent-color: var(--theme-accent, #68ceda); }
+.selfie-santa-loading { margin: 8px 0 0; color: #e6e2eb; font-size: 13px; }
+.selfie-monitor-layout { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 24px; }
+.selfie-monitor-sessions { display: flex; flex-direction: column; gap: 12px; }
+.selfie-monitor-sessions .button { display: flex; flex-direction: column; align-items: flex-start; height: auto; white-space: normal; text-align: left; gap: 8px; }
+.selfie-monitor-sessions .button[aria-pressed="true"] { border-color: var(--theme-accent, #68ceda); }
+.selfie-monitor-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
+.selfie-monitor-photos figure { margin: 0; min-width: 0; }
+.selfie-monitor-photos img { display: block; width: 100%; height: 240px; object-fit: contain; background: #101015; border-radius: 8px; }
+.selfie-monitor-photos figcaption { margin-top: 8px; font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .selfie-monitor-layout { grid-template-columns: minmax(0, 1fr); } }
 .qa-winner-card { min-height: 270px; display: grid; align-content: center; justify-items: center; gap: 12px; padding: 30px; border: 1px solid #705d32; border-radius: var(--theme-radius, 8px); background: linear-gradient(145deg, #2b261b, #201d24); text-align: center; }
 .qa-winner-eyebrow { color: #f4cf51; font: 11px var(--mono); letter-spacing: .08em; }
 .qa-winner-trophy { font-size: 40px; }

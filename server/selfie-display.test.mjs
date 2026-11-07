@@ -63,6 +63,22 @@ test('OBS display works without login and exposes only approved photos for its a
   }
   const session = await createSession()
   const otherSession = await createSession()
+  const normalStatus = await (await fetch(`${base}/api/selfie/join/${session.joinToken}/status`)).json()
+  assert.equal(normalStatus.santaEnabled, false)
+  const santaResponse = await fetch(`${base}/api/selfie/sessions`, {
+    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ santaEnabled: true }),
+  })
+  assert.equal(santaResponse.status, 201)
+  const santaSession = await santaResponse.json()
+  assert.equal(santaSession.santaEnabled, true)
+  const santaStatus = await (await fetch(`${base}/api/selfie/join/${santaSession.joinToken}/status`)).json()
+  assert.equal(santaStatus.santaEnabled, true)
+  const invalidMode = await fetch(`${base}/api/selfie/sessions`, {
+    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ santaEnabled: 'true' }),
+  })
+  assert.equal(invalidMode.status, 400)
   database = new DatabaseSync(filename)
   const stored = database.prepare('SELECT display_token_hash FROM selfie_sessions WHERE id = ?').get(session.id)
   assert.equal(stored.display_token_hash.length, 64)
@@ -72,6 +88,24 @@ test('OBS display works without login and exposes only approved photos for its a
   for (const [id, sessionId, status] of [['approved-photo', session.id, 'approved'], ['pending-photo', session.id, 'pending'], ['other-photo', otherSession.id, 'approved']]) {
     insert.run(id, sessionId, 'image/png', image, 'photo.png', status, new Date().toISOString())
   }
+  const monitorUrl = `${base}/api/admin/selfie/sessions`
+  const monitorPhoto = `${monitorUrl}/${session.id}/photos/pending-photo/image`
+  const adminHeaders = { Cookie: cookie }
+  const monitor = await fetch(monitorUrl, { headers: adminHeaders })
+  assert.equal(monitor.status, 200)
+  assert.equal(monitor.headers.get('cache-control'), 'no-store')
+  const monitored = (await monitor.json()).sessions
+  assert.equal(monitored.length, 3)
+  assert.equal(monitored.find((item) => item.id === session.id).photos.length, 2)
+  assert.ok(monitored.every((item) => !('joinToken' in item) && !('displayToken' in item)))
+  assert.equal((await fetch(monitorPhoto, { headers: adminHeaders })).status, 200)
+  assert.equal((await fetch(`${monitorUrl}/${otherSession.id}/photos/pending-photo/image`, { headers: adminHeaders })).status, 404)
+  assert.equal((await fetch(monitorUrl)).status, 401)
+  assert.equal((await fetch(monitorPhoto)).status, 401)
+  database.prepare("UPDATE users SET role = 'host' WHERE username = ?").run('test-host')
+  assert.equal((await fetch(monitorUrl, { headers: adminHeaders })).status, 403)
+  assert.equal((await fetch(monitorPhoto, { headers: adminHeaders })).status, 403)
+  database.prepare("UPDATE users SET role = 'admin' WHERE username = ?").run('test-host')
   const displayBase = `${base}/api/selfie/display/${session.id}/submissions`
   const headers = { 'X-Selfie-Display-Token': session.displayToken }
   const list = await fetch(displayBase, { headers })
@@ -101,7 +135,11 @@ test('OBS display works without login and exposes only approved photos for its a
   database.prepare('UPDATE selfie_sessions SET expires_at = ? WHERE id = ?').run('2000-01-01T00:00:00.000Z', session.id)
   assert.equal((await fetch(displayBase, { headers })).status, 410)
   assert.equal((await fetch(photoUrl('approved-photo'))).status, 410)
+  const activeMonitor = (await (await fetch(monitorUrl, { headers: adminHeaders })).json()).sessions
+  assert.ok(!activeMonitor.some((item) => item.id === session.id))
+  assert.equal((await fetch(monitorPhoto, { headers: adminHeaders })).status, 404)
   const close = await fetch(`${base}/api/selfie/sessions/${otherSession.id}/close`, { method: 'POST', headers: { Cookie: cookie } })
   assert.equal(close.status, 204)
+  assert.ok(!(await (await fetch(monitorUrl, { headers: adminHeaders })).json()).sessions.some((item) => item.id === otherSession.id))
   assert.equal((await fetch(`${base}/api/selfie/display/${otherSession.id}/submissions`, { headers: { 'X-Selfie-Display-Token': otherSession.displayToken } })).status, 404)
 })

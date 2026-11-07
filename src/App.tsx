@@ -37,6 +37,7 @@ import PollEditDialog from './PollEditDialog'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 import SelfieCam, { SelfieParticipant } from './SelfieCam'
 import SelfieDisplay from './SelfieDisplay'
+import SelfieMonitor from './SelfieMonitor'
 import { ThemeBrand } from './theme'
 import VanishingGame from './VanishingGame'
 import { RaffleDisplayPage, RaffleHostPage, RaffleJoinPage } from './Raffle'
@@ -465,6 +466,11 @@ function App() {
       ? <ThemeSettings scope="game" onBack={() => window.location.assign('/game')} />
       : <AccessDeniedPage onLogout={() => void logout()} />
   }
+  if (window.location.pathname === '/admin/selfie') {
+    return authUser.role === 'admin'
+      ? <SelfieMonitor username={authUser.username} onLogout={() => void logout()} />
+      : <AccessDeniedPage onLogout={() => void logout()} />
+  }
   if (window.location.pathname === '/admin/videos') {
     return authUser.role === 'admin'
       ? <AdVideoSettings username={authUser.username} onLogout={() => void logout()} />
@@ -670,6 +676,7 @@ function ActivityDashboard({
         <ThemeBrand />
         <div className="topbar-actions">
           {user.role === 'admin' && <>
+            <a className="button button-quiet manage-users-link" href="/admin/selfie"><Camera size={16} /> Selfie monitor</a>
             <a className="button button-quiet manage-users-link" href="/admin/videos" aria-label="Manage videos" title="Manage videos"><Film size={16} /> Videos</a>
             <a className="button button-quiet manage-users-link" href="/admin/terms" aria-label="Edit Terms of Service" title="Edit Terms of Service"><FileText size={16} /> Terms</a>
             <a className="button button-quiet manage-users-link theme-settings-link" href="/admin/theme" aria-label="Appearance and theme settings" title="Appearance and theme settings"><Palette size={16} /> Appearance &amp; Theme Settings</a>
