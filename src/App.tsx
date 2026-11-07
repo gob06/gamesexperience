@@ -78,6 +78,8 @@ const gamePath = window.location.pathname.match(/^\/game(?:\/([^/]+))?\/?$/)
 const selfiePath = /^\/selfie\/?$/.test(window.location.pathname)
 const selfieJoinPath = window.location.pathname.match(/^\/selfie\/join\/([A-Za-z0-9_-]+)\/?$/)
 const selfieDisplayPath = window.location.pathname.match(/^\/selfie\/display\/([A-Za-z0-9_-]+)\/?$/)
+const selfieDisplayParams = new URLSearchParams(window.location.hash.slice(1))
+const selfieDisplayToken = selfieDisplayParams.get('display') || ''
 const raffleJoinPath = window.location.pathname.match(/^\/raffle\/join\/([^/]+)\/?$/)
 const raffleDisplayPath = window.location.pathname.match(/^\/raffle\/([^/]+)\/display\/?$/)
 
@@ -445,6 +447,7 @@ function App() {
   if (pollPath) return <PollEntry pollId={decodeURIComponent(pollPath[1])} />
   if (gamePath?.[1]) return <VanishingGame roomId={decodeURIComponent(gamePath[1])} />
   if (selfieJoinPath) return <SelfieParticipant token={selfieJoinPath[1]} />
+  if (selfieDisplayPath && selfieDisplayToken) return <SelfieDisplay sessionId={selfieDisplayPath[1]} joinToken={selfieDisplayParams.get('join') || ''} displayToken={selfieDisplayToken} />
   if (raffleJoinPath) return <RaffleJoinPage raffleId={decodeURIComponent(raffleJoinPath[1])} />
   if (raffleDisplayPath) return <RaffleDisplayPage raffleId={decodeURIComponent(raffleDisplayPath[1])} />
   if (authLoading) return <AuthLoading />

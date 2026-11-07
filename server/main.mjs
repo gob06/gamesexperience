@@ -986,12 +986,13 @@ app.post('/api/selfie/sessions', requireUser, async (request, response) => {
   await database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(now.toISOString())
   const sessionId = randomUUID()
   const joinToken = randomBytes(32).toString('base64url')
+  const displayToken = randomBytes(32).toString('base64url')
   const expiresAt = new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString()
   await database.prepare(`
-    INSERT INTO selfie_sessions (id, join_token_hash, owner_user_id, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(sessionId, hashSessionToken(joinToken), request.user.id, now.toISOString(), expiresAt)
-  response.status(201).json({ id: sessionId, joinToken, expiresAt })
+    INSERT INTO selfie_sessions (id, join_token_hash, display_token_hash, owner_user_id, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(sessionId, hashSessionToken(joinToken), hashSessionToken(displayToken), request.user.id, now.toISOString(), expiresAt)
+  response.status(201).json({ id: sessionId, joinToken, displayToken, expiresAt })
 })
 
 app.post('/api/selfie/sessions/:id/banner', requireUser, imageUpload.single('image'), async (request, response) => {
@@ -1056,6 +1057,42 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request,
   if (submitted === 'paused') return response.status(423).json({ error: 'The host has paused photo uploads. Please try again shortly.' })
   if (submitted === 'limit') return response.status(429).json({ error: 'This selfie session has reached its submission limit.' })
   response.status(201).json({ id, status: 'pending' })
+})
+
+async function requireSelfieDisplay(request, response, next) {
+  response.set('Cache-Control', 'no-store')
+  const token = request.get('X-Selfie-Display-Token') || request.query.token
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
+    return response.status(403).json({ error: 'This live-screen link is invalid. Copy a new OBS URL from the host screen.' })
+  }
+  const session = await database.prepare(`
+    SELECT id, paused, expires_at AS expiresAt, closed_at AS closedAt
+    FROM selfie_sessions WHERE id = ? AND display_token_hash = ?
+  `).get(request.params.sessionId, hashSessionToken(token))
+  if (!session) return response.status(404).json({ error: 'This live-screen link is invalid or the selfie session has ended.' })
+  if (session.closedAt || Date.parse(session.expiresAt) <= Date.now()) {
+    return response.status(410).json({ error: 'This selfie session has ended.', closed: true })
+  }
+  request.selfieDisplaySession = session
+  next()
+}
+
+app.get('/api/selfie/display/:sessionId/submissions', requireSelfieDisplay, async (request, response) => {
+  const session = request.selfieDisplaySession
+  const submissions = await database.prepare(`
+    SELECT id, status, created_at AS createdAt, approved_at AS approvedAt
+    FROM selfie_submissions WHERE session_id = ? AND status = 'approved' ORDER BY created_at DESC
+  `).all(session.id)
+  response.json({ submissions, paused: Boolean(session.paused), expiresAt: session.expiresAt, closed: false })
+})
+
+app.get('/api/selfie/display/:sessionId/submissions/:submissionId/image', requireSelfieDisplay, async (request, response) => {
+  const image = await database.prepare(`
+    SELECT image, image_mime_type AS mimeType FROM selfie_submissions
+    WHERE id = ? AND session_id = ? AND status = 'approved'
+  `).get(request.params.submissionId, request.selfieDisplaySession.id)
+  if (!image) return response.status(404).json({ error: 'This approved photo could not be found.' })
+  response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').send(Buffer.from(image.image))
 })
 
 app.get('/api/selfie/sessions/:id/submissions', requireUser, async (request, response) => {

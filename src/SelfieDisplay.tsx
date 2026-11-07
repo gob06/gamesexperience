@@ -5,7 +5,7 @@ import { getSelfieJoinUrl } from './SelfieCam'
 
 type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string; approvedAt?: string | null }
 
-export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: string; joinToken: string }) {
+export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' }: { sessionId: string; joinToken: string; displayToken?: string }) {
   const qrRef = useRef<HTMLCanvasElement>(null)
   const [joinUrl, setJoinUrl] = useState('')
   const [photos, setPhotos] = useState<Submission[]>([])
@@ -54,13 +54,23 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
     let active = true
     async function refresh() {
       try {
-        const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions`, { cache: 'no-store' })
-        const result = await response.json() as { submissions?: Submission[]; closed?: boolean; error?: string }
+        const base = displayToken ? '/api/selfie/display' : '/api/selfie/sessions'
+        const response = await fetch(`${base}/${encodeURIComponent(sessionId)}/submissions`, {
+          cache: 'no-store',
+          headers: displayToken ? { 'X-Selfie-Display-Token': displayToken } : undefined,
+        })
+        const result = await response.json() as { submissions?: Submission[]; closed?: boolean; paused?: boolean; error?: string }
         if (!active) return
+        if (response.status === 404 || response.status === 410) {
+          setPhotos([])
+          setClosed(true)
+          setError(result.error || 'This selfie session has ended.')
+          return
+        }
         if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load photos.')
         setPhotos(result.submissions.filter((submission) => submission.status === 'approved'))
         setClosed(Boolean(result.closed))
-        setPaused(Boolean((result as { paused?: boolean }).paused))
+        setPaused(Boolean(result.paused))
         setError('')
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : 'Could not load photos.')
@@ -72,7 +82,7 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
       active = false
       window.clearInterval(timer)
     }
-  }, [sessionId])
+  }, [sessionId, displayToken])
 
   useEffect(() => {
     function enterFullscreen() {
@@ -93,7 +103,9 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
     }
   }, [])
 
-  const imageUrl = (id: string) => `/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/image`
+  const imageUrl = (id: string) => displayToken
+    ? `/api/selfie/display/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/image?token=${encodeURIComponent(displayToken)}`
+    : `/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/image`
   const slides = [...photos].sort((a, b) => (a.approvedAt || a.createdAt).localeCompare(b.approvedAt || b.createdAt))
   const current = slides.length ? slides[index % slides.length] : null
   const currentId = current?.id ?? null
@@ -115,7 +127,7 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
     const fallback = window.setTimeout(show, 3000)
     const trim = window.setTimeout(() => { if (active) setLayers((value) => value.slice(-1)) }, 4600)
     return () => { active = false; window.clearTimeout(trim); window.clearTimeout(fallback) }
-  }, [currentId, sessionId])
+  }, [currentId, sessionId, displayToken])
 
   useEffect(() => {
     if (slides.length < 2 || paused) return
@@ -127,7 +139,7 @@ export default function SelfieDisplay({ sessionId, joinToken }: { sessionId: str
     <main className="selfie-display">
       <section className="selfie-display-wall" aria-label="Live guest photos">
         {!layers.length ? (
-          <p className="selfie-display-empty">{closed ? 'This selfie session has ended.' : error || 'Photos will appear here as guests send them.'}</p>
+          <p className="selfie-display-empty">{error || (closed ? 'This selfie session has ended.' : 'Photos will appear here as guests send them.')}</p>
         ) : (
           layers.map((id) => (
             <div className="selfie-slide" key={id}>

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import QRCode from 'qrcode'
-import { ArrowLeft, Camera, Check, ImagePlus, Maximize, Minimize, Pause, Play, QrCode, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Camera, Check, Copy, ImagePlus, Maximize, Minimize, Pause, Play, QrCode, Trash2, Upload, X } from 'lucide-react'
 import { ThemeBrand } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 
-type SelfieSession = { id: string; joinToken: string; expiresAt: string }
+type SelfieSession = { id: string; joinToken: string; displayToken: string; expiresAt: string }
 type SelfieSubmission = { id: string; fileName: string; status: 'pending' | 'approved'; createdAt: string }
 
 export async function getSelfieJoinUrl(token: string) {
@@ -113,7 +113,7 @@ export default function SelfieCam() {
     try {
       const response = await fetch('/api/selfie/sessions', { method: 'POST' })
       const result = await response.json() as SelfieSession & { error?: string }
-      if (!response.ok || !result.id || !result.joinToken) throw new Error(result.error || 'Could not create a selfie session.')
+      if (!response.ok || !result.id || !result.joinToken || !result.displayToken) throw new Error(result.error || 'Could not create a selfie session. Update and restart the server, then try again.')
       if (bannerFile) {
         const form = new FormData()
         form.append('image', bannerFile)
@@ -281,6 +281,17 @@ export default function SelfieCam() {
 
   const pendingSubmissions = submissions.filter((submission) => submission.status === 'pending')
   const approvedSubmissions = submissions.filter((submission) => submission.status === 'approved')
+  const liveScreenUrl = session ? new URL(`/selfie/display/${encodeURIComponent(session.id)}#${new URLSearchParams({ join: session.joinToken, display: session.displayToken })}`, window.location.origin).href : ''
+
+  async function copyLiveScreenUrl() {
+    try {
+      await navigator.clipboard.writeText(liveScreenUrl)
+      setNotice('OBS URL copied. Paste it into an OBS Browser Source.')
+      setError('')
+    } catch {
+      setError('Clipboard access is unavailable. Select and copy the OBS URL below manually.')
+    }
+  }
 
   return (
     <main className="selfie-shell">
@@ -325,7 +336,11 @@ export default function SelfieCam() {
                 <div className="selfie-qr-frame"><canvas ref={qrCanvasRef} aria-label="Scan this QR code to submit a selfie" /></div>
                 <p>Scan with a phone camera. Photos must be approved before they appear on screen.</p>
                 <a href={joinUrl} target="_blank" rel="noreferrer">Open guest upload page</a>
-                <a className="button button-primary" href={`/selfie/display/${encodeURIComponent(session.id)}#${encodeURIComponent(session.joinToken)}`} target="_blank" rel="noreferrer"><Maximize size={15} /> Open live screen (QR + photos)</a>
+                <a className="button button-primary" href={liveScreenUrl} target="_blank" rel="noreferrer"><Maximize size={15} /> Open live screen (QR + photos)</a>
+                <button className="button button-secondary" type="button" onClick={() => void copyLiveScreenUrl()}><Copy size={15} /> Copy OBS URL</button>
+                <label htmlFor="selfie-obs-url">OBS Browser Source URL</label>
+                <input id="selfie-obs-url" type="text" readOnly value={liveScreenUrl} onFocus={(event) => event.currentTarget.select()} />
+                <p>In OBS, add a Browser Source, paste this entire URL, and set its size to 1920 × 1080. Opening the live screen only opens a browser tab; it does not add an OBS source. Keep this link private: it grants read-only access to approved photos until the session ends.</p>
                 <span className="selfie-expiry">Session ends {new Date(session.expiresAt).toLocaleTimeString()}</span>
               </div>
               <div className="selfie-review-heading"><h3>Photo review</h3><span>{pendingSubmissions.length} waiting · {approvedSubmissions.length} approved</span></div>
