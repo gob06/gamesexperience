@@ -1,17 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { Smartphone } from 'lucide-react'
 import { getSelfieJoinUrl } from './SelfieCam'
+import { initialCarouselState, selfieCarousel } from './selfieCarousel'
 
 type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string; approvedAt?: string | null }
 
 export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' }: { sessionId: string; joinToken: string; displayToken?: string }) {
   const qrRef = useRef<HTMLCanvasElement>(null)
   const [joinUrl, setJoinUrl] = useState('')
-  const [photos, setPhotos] = useState<Submission[]>([])
-  const [index, setIndex] = useState(0)
+  const [carousel, dispatch] = useReducer(selfieCarousel, initialCarouselState)
   const [closed, setClosed] = useState(false)
-  const [paused, setPaused] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -52,6 +51,8 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
 
   useEffect(() => {
     let active = true
+    let timer: number
+    dispatch({ type: 'reset' })
     async function refresh() {
       try {
         const base = displayToken ? '/api/selfie/display' : '/api/selfie/sessions'
@@ -62,25 +63,25 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
         const result = await response.json() as { submissions?: Submission[]; closed?: boolean; paused?: boolean; error?: string }
         if (!active) return
         if (response.status === 404 || response.status === 410) {
-          setPhotos([])
+          dispatch({ type: 'reset' })
           setClosed(true)
           setError(result.error || 'This selfie session has ended.')
           return
         }
         if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load photos.')
-        setPhotos(result.submissions.filter((submission) => submission.status === 'approved'))
+        dispatch({ type: 'refresh', photos: result.submissions.filter((submission) => submission.status === 'approved'), paused: Boolean(result.paused) })
         setClosed(Boolean(result.closed))
-        setPaused(Boolean(result.paused))
         setError('')
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : 'Could not load photos.')
+      } finally {
+        if (active) timer = window.setTimeout(() => void refresh(), 2000)
       }
     }
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 2000)
     return () => {
       active = false
-      window.clearInterval(timer)
+      window.clearTimeout(timer)
     }
   }, [sessionId, displayToken])
 
@@ -106,9 +107,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
   const imageUrl = (id: string) => displayToken
     ? `/api/selfie/display/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/image?token=${encodeURIComponent(displayToken)}`
     : `/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(id)}/image`
-  const slides = [...photos].sort((a, b) => (a.approvedAt || a.createdAt).localeCompare(b.approvedAt || b.createdAt))
-  const current = slides.length ? slides[index % slides.length] : null
-  const currentId = current?.id ?? null
+  const currentId = carousel.currentId
   const [layers, setLayers] = useState<string[]>([])
 
   // Preload the next photo, then fade it in over the previous one so the wall never goes blank.
@@ -130,10 +129,10 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
   }, [currentId, sessionId, displayToken])
 
   useEffect(() => {
-    if (slides.length < 2 || paused) return
-    const timer = window.setInterval(() => setIndex((value) => value + 1), 5000)
-    return () => window.clearInterval(timer)
-  }, [slides.length, paused])
+    if (carousel.paused || (carousel.photos.length < 2 && !carousel.pendingIds.length)) return
+    const timer = window.setTimeout(() => dispatch({ type: 'advance' }), 5000)
+    return () => window.clearTimeout(timer)
+  }, [currentId, carousel.photos.length, carousel.pendingIds.length, carousel.paused])
 
   return (
     <main className="selfie-display">
