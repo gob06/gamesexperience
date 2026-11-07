@@ -339,6 +339,7 @@ export default function SelfieCam() {
               </div>
               <SavedLogoPicker onSelect={(logo) => void useSavedBanner(logo)} label="Image bank (guest page photo)" />
               <button className="button button-primary selfie-start-button" type="button" onClick={() => void createSession()} disabled={loading}><QrCode size={17} /> {loading ? 'Creating session…' : 'Create selfie QR code'}</button>
+              <button className="button button-secondary selfie-start-button" type="button" onClick={() => void createSession(true)} disabled={loading}><Camera size={17} /> Create Santa selfie QR</button>
             </div>
           ) : (
             <div className="selfie-host-session">

@@ -226,7 +226,7 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
       ) : showQrOnly ? (
         <section className="raffle-screen-qr-only" aria-label="Raffle entry QR code">
             {shareUrl && data ? <RaffleQrCode value={shareUrl} logoUrl={eventLogoUrl} size={1024} label={`QR code to enter ${data.raffle.title}`} /> : <span>Loading QR…</span>}
-            <p className="raffle-screen-scan"><Smartphone aria-hidden="true" />SCAN THE QR CODE FOR THE RAFFLE DRAW</p>
+            <p className="raffle-screen-scan"><Smartphone aria-hidden="true" />Scan the QR Code to register</p>
         </section>
       ) : (
         <section className={`raffle-screen-grid ${isDrawing ? 'is-drawing' : ''} ${winner ? 'has-winner' : ''}`}>
