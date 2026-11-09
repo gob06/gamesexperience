@@ -20,6 +20,7 @@ import {
   Plus,
   QrCode,
   Shield,
+  Shuffle,
   Smartphone,
   Ticket,
   Trash2,
@@ -41,6 +42,7 @@ import SelfieMonitor from './SelfieMonitor'
 import { ThemeBrand } from './theme'
 import VanishingGame from './VanishingGame'
 import { RaffleDisplayPage, RaffleHostPage, RaffleJoinPage } from './Raffle'
+import { ScrambleDisplayPage, ScrambleHostPage, ScrambleJoinPage } from './Scramble'
 
 type PollOption = { id: string; label: string; votes: number; imageUrl?: string | null; hideLabel?: boolean }
 type Poll = { id: string; question: string; joinTitle?: string | null; questionImageUrl?: string | null; options: PollOption[]; createdAt: string; logoUrl?: string | null; isQa: boolean; winnerName?: string; winnerTicketNumber?: string; winnerAnswer?: string; votingEnabled: boolean; videoEnabled: boolean; revealCorrect?: boolean; correctOptionId?: string | null; stats?: { participants: number; submissions: number; winners: number; nonWinners: number } }
@@ -83,6 +85,8 @@ const selfieDisplayParams = new URLSearchParams(window.location.hash.slice(1))
 const selfieDisplayToken = selfieDisplayParams.get('display') || ''
 const raffleJoinPath = window.location.pathname.match(/^\/raffle\/join\/([^/]+)\/?$/)
 const raffleDisplayPath = window.location.pathname.match(/^\/raffle\/([^/]+)\/display\/?$/)
+const scrambleJoinPath = window.location.pathname.match(/^\/scramble\/join\/([^/]+)\/?$/)
+const scrambleDisplayPath = window.location.pathname.match(/^\/scramble\/([^/]+)\/display\/?$/)
 
 async function requestPolls(): Promise<Poll[]> {
   const response = await fetch('/api/polls')
@@ -443,7 +447,8 @@ function App() {
     setAuthUser(null)
   }
 
-  if (audienceThankYou) return <ThankYouScreen />
+  // The scramble join page shows its own thank-you screen with the answer result.
+  if (audienceThankYou && !scrambleJoinPath) return <ThankYouScreen />
   if (resultsPath) return <ResultsDisplay pollId={decodeURIComponent(resultsPath[1])} />
   if (pollPath) return <PollEntry pollId={decodeURIComponent(pollPath[1])} />
   if (gamePath?.[1]) return <VanishingGame roomId={decodeURIComponent(gamePath[1])} />
@@ -451,11 +456,14 @@ function App() {
   if (selfieDisplayPath && selfieDisplayToken) return <SelfieDisplay sessionId={selfieDisplayPath[1]} joinToken={selfieDisplayParams.get('join') || ''} displayToken={selfieDisplayToken} />
   if (raffleJoinPath) return <RaffleJoinPage raffleId={decodeURIComponent(raffleJoinPath[1])} />
   if (raffleDisplayPath) return <RaffleDisplayPage raffleId={decodeURIComponent(raffleDisplayPath[1])} />
+  if (scrambleJoinPath) return <ScrambleJoinPage gameId={decodeURIComponent(scrambleJoinPath[1])} />
+  if (scrambleDisplayPath) return <ScrambleDisplayPage gameId={decodeURIComponent(scrambleDisplayPath[1])} />
   if (authLoading) return <AuthLoading />
   if (setupRequired) return <LoginPage setupRequired onAuthenticated={handleAuthenticated} initialError={authError} />
   if (!authUser) return <LoginPage onAuthenticated={handleAuthenticated} initialError={authError} />
   if (monitorPath) return <QaMonitor pollId={decodeURIComponent(monitorPath[1])} isAdmin={authUser.role === 'admin'} />
   if (window.location.pathname === '/raffle') return <RaffleHostPage user={authUser} onLogout={() => void logout()} />
+  if (window.location.pathname === '/scramble') return <ScrambleHostPage user={authUser} onLogout={() => void logout()} />
   if (window.location.pathname === '/admin/theme') {
     return authUser.role === 'admin'
       ? <ThemeSettings onBack={() => window.location.assign('/')} />
@@ -699,6 +707,13 @@ function ActivityDashboard({
             <strong>QR Raffle</strong>
             <span className="activity-card-description">Register ticket holders by QR code and draw each winner only once.</span>
             <span className="activity-card-action">Open raffle dashboard <ArrowUpRight size={17} /></span>
+          </a>
+          <a className="activity-card scramble-activity" href="/scramble">
+            <span className="activity-card-icon"><Shuffle size={25} /></span>
+            <span className="activity-card-kicker">WORD GAME</span>
+            <strong>QR Word Scramble</strong>
+            <span className="activity-card-description">Register by QR, unscramble the word, and securely draw winners from the correct answers.</span>
+            <span className="activity-card-action">Open scramble dashboard <ArrowUpRight size={17} /></span>
           </a>
           <a className="activity-card qa-activity" href="/voting?mode=qa">
             <span className="activity-card-icon"><CircleHelp size={25} /></span>

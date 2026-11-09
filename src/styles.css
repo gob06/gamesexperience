@@ -1789,7 +1789,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .theme-root.skin-broadcast { --bc-bg: #050b35; --bc-line: #00d9ff; color: #f5f6fa;
   --bc-pattern: radial-gradient(circle at 50% 0%, rgba(0,107,255,.24), transparent 55%), radial-gradient(rgba(0,217,255,.16) 1px, transparent 1.5px), repeating-linear-gradient(135deg, transparent 0 34px, rgba(0,217,255,.05) 34px 36px), linear-gradient(125deg, #050b35, #071d68 50%, #050b35);
   --bc-pattern-size: auto, 13px 13px, auto, auto; }
-.theme-root.skin-broadcast .app-shell, .theme-root.skin-broadcast .activity-shell, .theme-root.skin-broadcast .vote-shell, .theme-root.skin-broadcast .auth-shell, .theme-root.skin-broadcast .admin-shell, .theme-root.skin-broadcast .selfie-shell, .theme-root.skin-broadcast .game-shell, .theme-root.skin-broadcast .monitor-shell, .theme-root.skin-broadcast .raffle-host-shell, .theme-root.skin-broadcast .raffle-audience-shell, .theme-root.skin-broadcast .audience-thank-you-shell {
+.theme-root.skin-broadcast .app-shell, .theme-root.skin-broadcast .activity-shell, .theme-root.skin-broadcast .vote-shell, .theme-root.skin-broadcast .auth-shell, .theme-root.skin-broadcast .admin-shell, .theme-root.skin-broadcast .selfie-shell, .theme-root.skin-broadcast .game-shell, .theme-root.skin-broadcast .monitor-shell, .theme-root.skin-broadcast .raffle-host-shell, .theme-root.skin-broadcast .raffle-audience-shell, .theme-root.skin-broadcast .scramble-screen-shell, .theme-root.skin-broadcast .audience-thank-you-shell {
   color: #f5f6fa; background-color: #050b35; background-image: var(--bc-pattern); background-size: var(--bc-pattern-size); background-repeat: repeat; background-position: 0 0; }
 .theme-root.skin-broadcast.bg-global .app-shell { background-image: var(--theme-global-background-image); background-size: var(--theme-background-size); background-repeat: var(--theme-background-repeat); background-position: var(--theme-background-position); }
 .theme-root.skin-broadcast.bg-voting .vote-shell { background-image: var(--theme-voting-background-image); background-size: var(--theme-background-size); background-repeat: var(--theme-background-repeat); background-position: var(--theme-background-position); }
@@ -1892,3 +1892,101 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-event:has(.raffle-screen-side-image) { width: 100%; grid-template-columns: minmax(0, 18vw) minmax(0, 1fr) minmax(0, 18vw); align-items: center; }
 .raffle-screen-event:has(.raffle-screen-side-image) h1 { grid-column: 2; grid-row: 1; }
 .raffle-screen-side-image { grid-row: 1; }
+
+/* === QR Word Scramble === */
+.scramble-activity .activity-card-icon { border-color: #c6f24e33; color: #c6f24e; background: #c6f24e14; }
+.scramble-activity .activity-card-action { color: #c6f24e; }
+
+.scramble-word { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 14px 0; }
+.scramble-word-letter { min-width: 1.5em; display: grid; place-items: center; padding: .32em .18em; border: 1px solid color-mix(in srgb, var(--theme-primary, #c6f24e), transparent 70%); border-radius: 9px; color: var(--theme-primary, #eaffb0); font-size: clamp(22px, 4.5vw, 34px); font-weight: 800; letter-spacing: .02em; background: color-mix(in srgb, var(--theme-background, #171d10), white 7%); box-shadow: 0 6px 18px #00000038; text-transform: uppercase; }
+.scramble-word-space { width: 1.1em; }
+.scramble-word.is-compact .scramble-word-letter { font-size: 19px; min-width: 1.35em; padding: .22em .14em; border-radius: 7px; }
+
+.scramble-audience-title { margin: 4px 0 10px; font-size: 23px; font-weight: 750; letter-spacing: -.02em; text-align: center; }
+.scramble-instructions { margin: 0 0 12px; color: #b9b3bd; font-size: 14px; line-height: 1.6; text-align: center; }
+.scramble-result { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 24px 18px; border-radius: 13px; text-align: center; }
+.scramble-result.is-correct { border: 1px solid #7ddf8c42; color: #c9f5d1; background: #1b3a2355; }
+.scramble-result.is-incorrect { border: 1px solid #ff829140; color: #ffd4da; background: #3a1b2255; }
+.scramble-result strong { font-size: 24px; letter-spacing: .06em; }
+.scramble-thanks { margin: 0 0 4px; color: #f5f1ed; font-size: 15px; font-weight: 800; letter-spacing: .09em; }
+.scramble-result span { color: inherit; font-size: 14px; line-height: 1.55; opacity: .92; }
+.scramble-revealed { margin: 8px 0 0; color: #f5f1ed; font-size: 14px; }
+.scramble-revealed strong { color: #c6f24e; letter-spacing: .04em; }
+
+/* Host dashboard */
+.scramble-game-view, .scramble-participants-view, .scramble-winners-view { display: flex; flex-direction: column; gap: 19px; }
+.scramble-controls { display: flex; flex-wrap: wrap; gap: 10px; }
+.scramble-controls .scramble-reset { margin-left: auto; color: #ff8291; }
+.scramble-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 10px; }
+.scramble-stats > div { display: flex; flex-direction: column; gap: 3px; padding: 13px 14px; border: 1px solid #ffffff1c; border-radius: 11px; background: #ffffff08; }
+.scramble-stats strong { color: #f5f1ed; font-size: 21px; }
+.scramble-stats span { color: #aaa4ac; font: 10.5px var(--mono, Consolas, monospace); letter-spacing: .08em; text-transform: uppercase; }
+.scramble-word-card { display: flex; flex-direction: column; gap: 9px; padding: 18px; border: 1px solid #ffffff1c; border-radius: 12px; background: #ffffff07; }
+.scramble-word-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.scramble-word-card h3 { display: inline-flex; align-items: center; gap: 7px; margin: 0; color: #f5f1ed; font-size: 15px; }
+.scramble-word-card label { color: #aaa4ac; font-size: 12.5px; }
+.scramble-word-card input { padding: 10px 12px; border: 1px solid #ffffff26; border-radius: 9px; color: #f5f1ed; font-size: 14px; background: #00000030; }
+.scramble-word-preview { display: flex; justify-content: center; padding: 6px 0; }
+.scramble-word-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.scramble-badge { padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--theme-primary, #c6f24e), transparent 70%); border-radius: 999px; color: var(--theme-primary, #c6f24e); font: 10.5px var(--mono, Consolas, monospace); letter-spacing: .08em; }
+.scramble-search { display: flex; align-items: center; gap: 9px; max-width: 420px; padding: 9px 13px; border: 1px solid #ffffff26; border-radius: 10px; color: #aaa4ac; background: #00000030; }
+.scramble-search input { flex: 1; border: 0; color: #f5f1ed; font-size: 14px; background: transparent; outline: none; }
+.scramble-table-wrap { overflow-x: auto; border: 1px solid #ffffff1c; border-radius: 12px; }
+.scramble-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.scramble-table th { padding: 11px 14px; border-bottom: 1px solid #ffffff22; color: #aaa4ac; font: 11px var(--mono, Consolas, monospace); letter-spacing: .08em; text-align: left; text-transform: uppercase; }
+.scramble-table td { padding: 10px 14px; border-bottom: 1px solid #ffffff10; color: #e8e4ea; vertical-align: top; }
+.scramble-table tr:last-child td { border-bottom: 0; }
+.scramble-pill { display: inline-flex; align-items: center; gap: 5px; margin: 1px 5px 1px 0; padding: 3px 9px; border: 1px solid #ffffff2b; border-radius: 999px; color: #b9b3bd; font-size: 11.5px; white-space: nowrap; }
+.scramble-pill.is-correct { border-color: #7ddf8c4d; color: #a9ecb5; background: #7ddf8c12; }
+.scramble-pill.is-incorrect { border-color: #ff829145; color: #ffb3bd; background: #ff829111; }
+.scramble-pill.is-winner { border-color: #f4cf514d; color: #f4cf51; background: #f4cf5112; }
+.scramble-randomize { display: flex; flex-direction: column; gap: 10px; padding: 17px; border: 1px solid #ffffff1c; border-radius: 12px; background: #ffffff07; }
+.scramble-randomize p { margin: 0; color: #e8e4ea; font-size: 14px; }
+.scramble-randomize-row { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; }
+.scramble-randomize-row label { color: #aaa4ac; font-size: 13px; }
+.scramble-randomize-row input { width: 90px; padding: 9px 11px; border: 1px solid #ffffff26; border-radius: 9px; color: #f5f1ed; font-size: 14px; background: #00000030; }
+.scramble-winner-group { display: flex; flex-direction: column; gap: 11px; padding: 17px; border: 1px solid #ffffff1c; border-radius: 12px; background: #ffffff07; }
+.scramble-winner-group h3 { display: inline-flex; align-items: center; gap: 7px; margin: 0; color: #f5f1ed; font-size: 15px; }
+.scramble-winner-group > .button { align-self: flex-start; }
+.scramble-winner-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.scramble-winner-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; padding: 10px 13px; border: 1px solid #ffffff14; border-radius: 10px; background: #00000026; }
+.scramble-winner-list strong { color: #f5f1ed; font-size: 15px; }
+.scramble-winner-list span { color: #aaa4ac; font-size: 13px; }
+.scramble-winner-list .button, .scramble-winner-list .scramble-pill { margin-left: auto; }
+
+/* Big screen / OBS display (1920x1080-friendly) */
+.scramble-screen-shell { position: relative; isolation: isolate; width: 100vw; height: 100vh; display: grid; place-items: center; overflow: hidden; padding: clamp(16px, 2vw, 32px); color: var(--theme-text, #f6ffe9); background-color: var(--theme-background, #0b1405); background-image: var(--theme-results-background-image, none); background-size: var(--theme-background-size, cover); background-repeat: var(--theme-background-repeat, no-repeat); background-position: var(--theme-background-position, center); }
+.scramble-screen-shell::before { position: absolute; z-index: -1; inset: 0; background: repeating-linear-gradient(133deg, transparent 0 90px, rgba(255, 255, 255, .03) 91px 92px, transparent 93px 180px), radial-gradient(circle, rgba(255, 255, 255, .07) 0 1px, transparent 1.8px); background-size: auto, 14px 14px; content: ''; pointer-events: none; }
+.scramble-screen-intro, .scramble-screen-stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(12px, 2.6vh, 30px); width: 100%; text-align: center; }
+.scramble-screen-title { margin: 0; font-size: clamp(30px, 5.2vh, 62px); font-weight: 800; letter-spacing: -.02em; }
+.scramble-screen-subtitle { display: inline-flex; align-items: center; gap: 12px; margin: 0; color: var(--theme-primary, #d9f7a2); font-size: clamp(17px, 2.8vh, 32px); font-weight: 700; letter-spacing: .1em; }
+.scramble-screen-qr canvas { display: block; width: min(58vmin, 760px) !important; height: min(58vmin, 760px) !important; aspect-ratio: 1; border-radius: 14px; background: #fff; }
+.scramble-screen-stage .scramble-word { gap: clamp(8px, 1.4vw, 18px); }
+.scramble-screen-stage .scramble-word-letter { font-size: clamp(40px, 9vh, 112px); border-radius: 14px; }
+.scramble-screen-badge { padding: 7px 17px; border: 1px solid color-mix(in srgb, var(--theme-primary, #c6f24e), transparent 60%); border-radius: 999px; color: var(--theme-primary, #c6f24e); font: clamp(13px, 1.8vh, 19px) var(--mono, Consolas, monospace); letter-spacing: .13em; }
+.scramble-screen-corner-qr { position: absolute; right: clamp(14px, 2.4vw, 42px); bottom: clamp(14px, 2.4vh, 42px); display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.scramble-screen-corner-qr canvas { display: block; width: clamp(110px, 15vmin, 210px) !important; height: clamp(110px, 15vmin, 210px) !important; border-radius: 10px; background: #fff; }
+.scramble-screen-corner-qr span { color: var(--theme-primary, #d9f7a2); font-size: clamp(12px, 1.6vh, 17px); font-weight: 700; letter-spacing: .08em; }
+.scramble-screen-reveal .scramble-word-letter { border-color: color-mix(in srgb, var(--theme-secondary, #f4cf51), transparent 60%); color: var(--theme-secondary, #ffeaa3); background: color-mix(in srgb, var(--theme-background, #201b09), white 10%); animation: scramble-reveal-pop .55s cubic-bezier(.2, 1.4, .4, 1) both; }
+.scramble-screen-reveal .scramble-word-letter:nth-child(2n) { animation-delay: .08s; }
+.scramble-screen-reveal .scramble-word-letter:nth-child(3n) { animation-delay: .16s; }
+@keyframes scramble-reveal-pop { from { opacity: 0; transform: translateY(22px) scale(.72); } to { opacity: 1; transform: none; } }
+.scramble-screen-winners { display: flex; flex-direction: column; gap: clamp(10px, 1.8vh, 20px); max-height: 62vh; margin: 0; padding: 0 6px; overflow: hidden auto; list-style: none; }
+.scramble-screen-winners li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 8px 22px; padding: clamp(12px, 2vh, 22px) clamp(24px, 4vw, 64px); border: 1px solid color-mix(in srgb, var(--theme-primary, #c6f24e), transparent 70%); border-radius: 16px; background: color-mix(in srgb, var(--theme-background, #141d0a), white 8%); animation: scramble-winner-in .6s cubic-bezier(.2, 1.3, .4, 1) both; }
+.scramble-screen-winners strong { font-size: clamp(26px, 4.6vh, 56px); font-weight: 800; letter-spacing: -.01em; }
+.scramble-screen-winners span { color: var(--theme-primary, #d9f7a2); font: clamp(14px, 2.2vh, 26px) var(--mono, Consolas, monospace); letter-spacing: .1em; }
+.scramble-screen-winners.is-compact strong { font-size: clamp(20px, 3.2vh, 38px); }
+@keyframes scramble-winner-in { from { opacity: 0; transform: translateY(26px) scale(.94); } to { opacity: 1; transform: none; } }
+@media (max-width: 640px) {
+  .scramble-screen-shell { height: auto; min-height: 100vh; overflow: auto; }
+  .scramble-screen-corner-qr { position: static; margin-top: 10px; }
+  .scramble-controls .scramble-reset { margin-left: 0; }
+}
+
+/* Published theme backgrounds for QR Word Scramble pages (host, audience, display). */
+.theme-root .scramble-audience-shell { background: var(--theme-background, #11131b); }
+.theme-root .scramble-host-shell { background-color: var(--theme-background, #131317); }
+.theme-root.bg-voting .scramble-audience-shell { background-color: var(--theme-background); background-image: var(--theme-voting-background-image); background-size: var(--theme-background-size); background-repeat: var(--theme-background-repeat); background-position: var(--theme-background-position); }
+.theme-root.bg-admin .scramble-host-shell { background-color: var(--theme-background); background-image: var(--theme-admin-background-image); background-size: var(--theme-background-size); background-repeat: var(--theme-background-repeat); background-position: var(--theme-background-position); }
+.theme-root.bg-results .scramble-screen-shell { background-color: var(--theme-background); background-image: var(--theme-results-background-image); background-size: var(--theme-background-size); background-repeat: var(--theme-background-repeat); background-position: var(--theme-background-position); }
+.theme-root.bg-results .scramble-screen-shell::before { content: none; }

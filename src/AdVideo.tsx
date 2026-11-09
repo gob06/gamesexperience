@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Film, LogOut, Trash2, Upload } from 'lucide-react'
 import { ThemeBrand } from './theme'
 
-export type AdVideoKind = 'poll' | 'qa' | 'game' | 'selfie' | 'raffle'
+export type AdVideoKind = 'poll' | 'qa' | 'game' | 'selfie' | 'raffle' | 'scramble'
 type AdVideoInfo = { available: boolean; url?: string; mimeType?: string; name?: string; size?: number; updatedAt?: string }
 const thankYouKey = `games-experience:thank-you:${window.location.pathname}`
 
@@ -49,6 +49,7 @@ const kindLabels: Record<AdVideoKind, { title: string; description: string }> = 
   game: { title: 'Vanishing Tic-Tac-Toe video', description: 'Plays full-screen for both players when a match ends.' },
   selfie: { title: 'Selfie Cam video', description: 'Plays full-screen on a guest’s phone right after they send their photo to the host.' },
   raffle: { title: 'QR Raffle video', description: 'Plays full-screen on a ticket holder’s phone after they register for a raffle.' },
+  scramble: { title: 'QR Word Scramble video', description: 'Plays full-screen on a participant’s phone right after they submit their word scramble answer, before the result appears.' },
 }
 
 export function AdVideoPlayer({ url, mimeType = 'video/mp4', expectedSize, videoRef: providedRef, onEnded, onContinue }: {
@@ -297,7 +298,7 @@ function AdVideoSlot({ kind, info, maxBytes, onChange }: { kind: AdVideoKind; in
 }
 
 export function AdVideoSettings({ username, onLogout }: { username: string; onLogout: () => void }) {
-  const [videos, setVideos] = useState<{ poll: AdVideoInfo; qa: AdVideoInfo; game: AdVideoInfo; selfie: AdVideoInfo; raffle: AdVideoInfo; maxBytes: number } | null>(null)
+  const [videos, setVideos] = useState<{ poll: AdVideoInfo; qa: AdVideoInfo; game: AdVideoInfo; selfie: AdVideoInfo; raffle: AdVideoInfo; scramble: AdVideoInfo; maxBytes: number } | null>(null)
   const [error, setError] = useState('')
 
   async function refresh() {
@@ -306,7 +307,7 @@ export function AdVideoSettings({ username, onLogout }: { username: string; onLo
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Could not load the videos.')
       const missing = { available: false }
-      setVideos({ ...result, poll: result.poll ?? missing, qa: result.qa ?? missing, game: result.game ?? missing, selfie: result.selfie ?? missing, raffle: result.raffle ?? missing })
+      setVideos({ ...result, poll: result.poll ?? missing, qa: result.qa ?? missing, game: result.game ?? missing, selfie: result.selfie ?? missing, raffle: result.raffle ?? missing, scramble: result.scramble ?? missing })
       setError('')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not load the videos.')
@@ -329,6 +330,7 @@ export function AdVideoSettings({ username, onLogout }: { username: string; onLo
             <AdVideoSlot kind="game" info={videos.game} maxBytes={videos.maxBytes} onChange={refresh} />
             <AdVideoSlot kind="selfie" info={videos.selfie} maxBytes={videos.maxBytes} onChange={refresh} />
             <AdVideoSlot kind="raffle" info={videos.raffle} maxBytes={videos.maxBytes} onChange={refresh} />
+            <AdVideoSlot kind="scramble" info={videos.scramble} maxBytes={videos.maxBytes} onChange={refresh} />
           </div>
         )}
       </div>

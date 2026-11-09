@@ -20,6 +20,16 @@ CREATE TABLE IF NOT EXISTS raffle_ad_videos (
   CHECK (kind = 'raffle')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+CREATE TABLE IF NOT EXISTS scramble_ad_videos (
+  kind VARCHAR(16) NOT NULL PRIMARY KEY,
+  file_name VARCHAR(255) NOT NULL,
+  original_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(100) NOT NULL,
+  size BIGINT NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  CHECK (kind = 'scramble')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
 CREATE TABLE IF NOT EXISTS polls (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
   question TEXT NOT NULL,
@@ -289,4 +299,41 @@ CREATE TABLE IF NOT EXISTS raffle_entries (
   INDEX raffle_entries_raffle_registered (raffle_id, registered_at),
   INDEX raffle_entries_raffle_won (raffle_id, won_at),
   FOREIGN KEY (raffle_id) REFERENCES raffle_sessions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS scramble_games (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  title VARCHAR(120) NOT NULL,
+  answer VARCHAR(120) NOT NULL,
+  scrambled VARCHAR(120) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'draft',
+  answer_revealed_at VARCHAR(32) NULL,
+  logo_mime_type VARCHAR(100) NULL,
+  logo LONGBLOB NULL,
+  created_by VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  CHECK (status IN ('draft', 'active', 'paused', 'closed', 'completed')),
+  INDEX scramble_games_created_at (created_at),
+  FOREIGN KEY (created_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS scramble_entries (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  game_id VARCHAR(64) NOT NULL,
+  participant_name VARCHAR(80) NOT NULL,
+  ticket_number VARCHAR(40) NOT NULL,
+  ticket_key VARCHAR(40) NOT NULL,
+  registered_at VARCHAR(32) NOT NULL,
+  answer VARCHAR(120) NULL,
+  is_correct TINYINT(1) NULL,
+  answered_at VARCHAR(32) NULL,
+  selected_at VARCHAR(32) NULL,
+  confirmed_at VARCHAR(32) NULL,
+  announced_at VARCHAR(32) NULL,
+  UNIQUE KEY scramble_entries_ticket (game_id, ticket_key),
+  INDEX scramble_entries_game_registered (game_id, registered_at),
+  INDEX scramble_entries_game_answered (game_id, answered_at),
+  INDEX scramble_entries_game_selected (game_id, selected_at),
+  FOREIGN KEY (game_id) REFERENCES scramble_games(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

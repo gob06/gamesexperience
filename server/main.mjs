@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { createDatabase, readDatabaseConfig } from './db.mjs'
 import { registerQaRoutes } from './qa.mjs'
 import { registerRaffleRoutes } from './raffle.mjs'
+import { registerScrambleRoutes } from './scramble.mjs'
 import { rateLimit } from './rate-limit.mjs'
 import { defaultTerms } from './defaultTerms.mjs'
 
@@ -1421,7 +1422,9 @@ const qa = registerQaRoutes({
 
 registerRaffleRoutes({ app, database, requireUser, imageUpload, hasValidImageSignature, inTransaction, audit })
 
-const adVideoKinds = ['poll', 'qa', 'game', 'selfie', 'raffle']
+registerScrambleRoutes({ app, database, requireUser, imageUpload, hasValidImageSignature, inTransaction, audit })
+
+const adVideoKinds = ['poll', 'qa', 'game', 'selfie', 'raffle', 'scramble']
 const adVideoTypes = { 'video/mp4': '.mp4', 'video/webm': '.webm' }
 
 function requireAdVideoKind(request, response, next) {
@@ -1453,13 +1456,18 @@ const adVideoUpload = multer({
   },
 })
 
+function adVideoTable(kind) {
+  if (kind === 'raffle') return 'raffle_ad_videos'
+  if (kind === 'scramble') return 'scramble_ad_videos'
+  return 'ad_videos'
+}
+
 function selectAdVideo(kind) {
-  const table = kind === 'raffle' ? 'raffle_ad_videos' : 'ad_videos'
-  return database.prepare(`SELECT kind, file_name AS fileName, original_name AS originalName, mime_type AS mimeType, size, updated_at AS updatedAt FROM ${table} WHERE kind = ?`).get(kind)
+  return database.prepare(`SELECT kind, file_name AS fileName, original_name AS originalName, mime_type AS mimeType, size, updated_at AS updatedAt FROM ${adVideoTable(kind)} WHERE kind = ?`).get(kind)
 }
 
 async function selectAudienceAdVideo(kind) {
-  return (await selectAdVideo(kind)) || (kind === 'raffle' ? selectAdVideo('poll') : undefined)
+  return (await selectAdVideo(kind)) || (['raffle', 'scramble'].includes(kind) ? selectAdVideo('poll') : undefined)
 }
 
 function adVideoSummary(video) {
@@ -1469,7 +1477,7 @@ function adVideoSummary(video) {
 }
 
 app.get('/api/admin/ad-videos', requireAdmin, async (_request, response) => {
-  response.json({ poll: adVideoSummary(await selectAdVideo('poll')), qa: adVideoSummary(await selectAdVideo('qa')), game: adVideoSummary(await selectAdVideo('game')), selfie: adVideoSummary(await selectAdVideo('selfie')), raffle: adVideoSummary(await selectAdVideo('raffle')), maxBytes: adVideoMaxBytes })
+  response.json({ poll: adVideoSummary(await selectAdVideo('poll')), qa: adVideoSummary(await selectAdVideo('qa')), game: adVideoSummary(await selectAdVideo('game')), selfie: adVideoSummary(await selectAdVideo('selfie')), raffle: adVideoSummary(await selectAdVideo('raffle')), scramble: adVideoSummary(await selectAdVideo('scramble')), maxBytes: adVideoMaxBytes })
 })
 
 app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoUpload.single('video'), async (request, response) => {
@@ -1483,9 +1491,8 @@ app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoU
   const fileName = `${kind}-${randomUUID()}${adVideoTypes[file.mimetype]}`
   renameSync(file.path, path.join(adVideosDirectory, fileName))
   const previous = await selectAdVideo(kind)
-  const table = kind === 'raffle' ? 'raffle_ad_videos' : 'ad_videos'
   await database.prepare(`
-    INSERT INTO ${table} (kind, file_name, original_name, mime_type, size, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO ${adVideoTable(kind)} (kind, file_name, original_name, mime_type, size, updated_at) VALUES (?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE file_name = VALUES(file_name), original_name = VALUES(original_name),
       mime_type = VALUES(mime_type), size = VALUES(size), updated_at = VALUES(updated_at)
   `).run(kind, fileName, path.basename(file.originalname).slice(0, 120), file.mimetype, file.size, new Date().toISOString())
@@ -1497,8 +1504,7 @@ app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoU
 app.delete('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, async (request, response) => {
   const previous = await selectAdVideo(request.params.kind)
   if (!previous) return response.status(404).json({ error: 'No video has been uploaded for this slot.' })
-  const table = request.params.kind === 'raffle' ? 'raffle_ad_videos' : 'ad_videos'
-  await database.prepare(`DELETE FROM ${table} WHERE kind = ?`).run(request.params.kind)
+  await database.prepare(`DELETE FROM ${adVideoTable(request.params.kind)} WHERE kind = ?`).run(request.params.kind)
   removeAdVideoFile(previous.fileName)
   await audit(request, 'ad-video.delete', 'ad-video', request.params.kind)
   response.status(204).end()

@@ -120,6 +120,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     `skin-${theme.skin || 'broadcast'}`,
     assetUrls.background ? 'bg-global' : '',
     assetUrls.votingBackground || assetUrls.background ? 'bg-voting' : '',
+    assetUrls.resultsBackground || assetUrls.background ? 'bg-results' : '',
     assetUrls.adminBackground || assetUrls.background ? 'bg-admin' : '',
   ].filter(Boolean).join(' ')
 
