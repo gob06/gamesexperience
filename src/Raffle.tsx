@@ -14,6 +14,7 @@ type Raffle = {
   displayImage2Url?: string | null
   createdAt: string
   drawStatus: 'idle' | 'drawing'
+  drawWinnerCount: number
   entryCount?: number
   winnerCount?: number
   registrationOpen?: boolean
@@ -32,6 +33,7 @@ type HostRaffleData = {
   entries: RaffleEntry[]
   eligible: RaffleEntry[]
   winners: RaffleEntry[]
+  latestWinners: RaffleEntry[]
 }
 
 type RaffleTab = 'qr' | 'draw' | 'winners'
@@ -138,6 +140,7 @@ type RaffleDisplayData = {
   raffle: Raffle
   counts: { entryCount: number; eligibleCount: number; winnerCount: number }
   latestWinner: RaffleEntry | null
+  latestWinners: RaffleEntry[]
   eligible: RaffleEntry[]
 }
 
@@ -145,12 +148,9 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
   const { assetUrls } = useTheme()
   const [data, setData] = useState<RaffleDisplayData | null>(null)
   const [rollingEntry, setRollingEntry] = useState<RaffleEntry | null>(null)
-  const [displayWinner, setDisplayWinner] = useState<RaffleEntry | null>(null)
   const [shareUrl, setShareUrl] = useState('')
   const [error, setError] = useState('')
   const eligibleRef = useRef<RaffleEntry[]>([])
-  const drawStatusRef = useRef<'idle' | 'drawing' | null>(null)
-  const winnerIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -161,12 +161,9 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
           raffleJoinUrl(raffleId),
         ])
         if (!active) return
-        const priorStatus = drawStatusRef.current
-        const nextWinnerId = result.latestWinner?.id ?? null
-        if (result.raffle.drawStatus === 'drawing') setDisplayWinner(null)
-        else if (priorStatus === 'drawing' && result.latestWinner && result.latestWinner.id !== winnerIdRef.current) setDisplayWinner(result.latestWinner)
-        drawStatusRef.current = result.raffle.drawStatus
-        winnerIdRef.current = nextWinnerId
+        if (!Array.isArray(result.latestWinners)) {
+          throw new Error('The raffle server is out of date. Restart the API server, then refresh this page.')
+        }
         eligibleRef.current = result.eligible
         setData(result)
         setShareUrl(url)
@@ -216,11 +213,13 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
     return () => window.clearInterval(timer)
   }, [isDrawing])
 
-  const winner = !isDrawing ? displayWinner : null
-  const showQrOnly = Boolean(data && !isDrawing && !winner)
+  const displayWinners = !isDrawing ? data?.latestWinners ?? [] : []
+  const hasWinners = displayWinners.length > 0
+  const showQrOnly = Boolean(data && !isDrawing && !hasWinners)
 
   return (
-    <main className={`raffle-screen-shell ${isDrawing ? 'is-drawing' : ''} ${winner ? 'has-winner' : ''}`}>
+    <main className={`raffle-screen-shell ${isDrawing ? 'is-drawing' : ''} ${hasWinners ? 'has-winner' : ''}`}>
+      {data && error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
       {!data ? (
         <div className="raffle-screen-message">{error || 'Connecting to raffle…'}</div>
       ) : showQrOnly ? (
@@ -229,7 +228,7 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
             <p className="raffle-screen-scan"><Smartphone aria-hidden="true" />Scan the QR Code to register</p>
         </section>
       ) : (
-        <section className={`raffle-screen-grid ${isDrawing ? 'is-drawing' : ''} ${winner ? 'has-winner' : ''}`}>
+        <section className={`raffle-screen-grid ${isDrawing ? 'is-drawing' : ''} ${hasWinners ? 'has-winner' : ''}`}>
           <div className="raffle-screen-main" aria-live="polite">
             <header className="raffle-screen-event">
               {data.raffle.displayImage1Url && <img className="raffle-screen-side-image is-left" src={data.raffle.displayImage1Url} alt="" />}
@@ -242,10 +241,18 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
                   <strong key={rollingEntry?.id || 'empty'} className="raffle-screen-name">{rollingEntry?.participantName || 'Waiting for eligible tickets…'}</strong>
                   {rollingEntry && <span className="raffle-screen-ticket">TICKET {rollingEntry.ticketNumber}</span>}
                 </div>
-              ) : winner && (
-                <div className="raffle-screen-winner">
-                  <strong>{winner.participantName}</strong>
-                  <span className="raffle-screen-ticket">TICKET {winner.ticketNumber}</span>
+              ) : hasWinners && (
+                <div className="raffle-screen-winners">
+                  <h2>{displayWinners.length} {displayWinners.length === 1 ? 'winner' : 'winners'}</h2>
+                  <ol className="raffle-screen-winner-list" aria-label="Latest draw winners">
+                    {displayWinners.map((entry, index) => (
+                      <li key={entry.id}>
+                        <span className="raffle-screen-winner-rank"><Trophy aria-hidden="true" /> {index + 1}</span>
+                        <strong>{entry.participantName}</strong>
+                        <span className="raffle-screen-ticket">TICKET {entry.ticketNumber}</span>
+                      </li>
+                    ))}
+                  </ol>
                 </div>
               )}
             </div>
@@ -346,7 +353,8 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   const [eligible, setEligible] = useState<RaffleEntry[]>([])
   const [winners, setWinners] = useState<RaffleEntry[]>([])
   const [rollingEntry, setRollingEntry] = useState<RaffleEntry | null>(null)
-  const [winner, setWinner] = useState<RaffleEntry | null>(null)
+  const [latestWinners, setLatestWinners] = useState<RaffleEntry[]>([])
+  const [winnerCount, setWinnerCount] = useState('1')
   const [tab, setTab] = useState<RaffleTab>('qr')
 
   const [title, setTitle] = useState('')
@@ -380,6 +388,8 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   }, [])
 
   useEffect(() => {
+    setLatestWinners([])
+    setWinnerCount('1')
     if (!selectedId) {
       setActiveRaffle(null)
       setEntries([])
@@ -396,10 +406,14 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
           raffleJoinUrl(selectedId),
         ])
         if (!active) return
+        if (!Array.isArray(data.latestWinners) || !Number.isSafeInteger(data.raffle.drawWinnerCount) || data.raffle.drawWinnerCount < 1) {
+          throw new Error('The raffle server is out of date. Restart the API server, then refresh this page.')
+        }
         setActiveRaffle(data.raffle)
         setEntries(data.entries)
         setEligible(data.eligible)
         setWinners(data.winners)
+        setLatestWinners(data.latestWinners)
         setShareUrl(url)
         if (data.raffle.drawStatus !== 'drawing') setRollingEntry(null)
         setError('')
@@ -504,11 +518,16 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     if (!activeRaffle) return
     setBusy(true)
     setError('')
-    setWinner(null)
     try {
-      const result = await requestJson<{ drawStatus: 'drawing'; eligible: RaffleEntry[] }>(`/api/raffles/${encodeURIComponent(activeRaffle.id)}/draw/start`, { method: 'POST' })
+      const count = Number(winnerCount)
+      if (!Number.isSafeInteger(count) || count < 1 || count > eligible.length) {
+        throw new Error('Choose a whole number of winners between 1 and the number of eligible tickets.')
+      }
+      const result = await requestJson<{ drawStatus: 'drawing'; drawWinnerCount: number; eligible: RaffleEntry[] }>(`/api/raffles/${encodeURIComponent(activeRaffle.id)}/draw/start`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ winnerCount: count }),
+      })
       setEligible(result.eligible)
-      setActiveRaffle((current) => current ? { ...current, drawStatus: result.drawStatus } : current)
+      setActiveRaffle((current) => current ? { ...current, drawStatus: result.drawStatus, drawWinnerCount: result.drawWinnerCount } : current)
       setTab('draw')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not start the draw.')
@@ -522,12 +541,14 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     setBusy(true)
     setError('')
     try {
-      const result = await requestJson<{ drawStatus: 'idle'; winner: RaffleEntry }>(`/api/raffles/${encodeURIComponent(activeRaffle.id)}/draw/stop`, { method: 'POST' })
-      setWinner(result.winner)
+      const result = await requestJson<{ drawStatus: 'idle'; winners: RaffleEntry[] }>(`/api/raffles/${encodeURIComponent(activeRaffle.id)}/draw/stop`, { method: 'POST' })
+      setLatestWinners(result.winners)
       setRollingEntry(null)
       setActiveRaffle((current) => current ? { ...current, drawStatus: 'idle' } : current)
-      setWinners((current) => [result.winner, ...current.filter((entry) => entry.id !== result.winner.id)])
-      setEligible((current) => current.filter((entry) => entry.id !== result.winner.id))
+      const winnerIds = new Set(result.winners.map((entry) => entry.id))
+      setWinners((current) => [...result.winners, ...current.filter((entry) => !winnerIds.has(entry.id))])
+      setEligible((current) => current.filter((entry) => !winnerIds.has(entry.id)))
+      setWinnerCount('1')
       setTab('draw')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not stop the draw.')
@@ -559,7 +580,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     }
   }
 
-  const displayedEntry = isDrawing ? rollingEntry : winner || winners[0] || null
+  const displayedEntry = isDrawing ? rollingEntry : latestWinners.length === 1 ? latestWinners[0] : null
 
   return (
     <main className="raffle-host-shell">
@@ -575,7 +596,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
         <header className="raffle-page-heading">
           <span className="raffle-kicker">EVENT DRAW</span>
           <h1>QR Raffle</h1>
-          <p>Register ticket holders, draw a winner, and keep every winning ticket out of future draws.</p>
+          <p>Register ticket holders, draw one or more winners, and keep every winning ticket out of future draws.</p>
         </header>
         {error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
         {notice && <p className="raffle-notice raffle-success-note" role="status">{notice}</p>}
@@ -604,7 +625,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
               {!raffles.length && <p className="raffle-muted">Your raffles will appear here.</p>}
               {raffles.map((raffle) => (
                 <div key={raffle.id} className={`raffle-session-item ${selectedId === raffle.id ? 'is-selected' : ''}`}>
-                  <button type="button" className="raffle-session-select" onClick={() => { setSelectedId(raffle.id); setWinner(null); setTab('qr') }}>
+                  <button type="button" className="raffle-session-select" onClick={() => { setSelectedId(raffle.id); setTab('qr') }}>
                     <span>{raffle.title}</span><small>{raffle.entryCount ?? 0} tickets · {raffle.winnerCount ?? 0} winners</small>
                   </button>
                   <button className="icon-button raffle-session-delete" type="button" onClick={() => void deleteRaffle(raffle)} aria-label={`Delete ${raffle.title}`} title="Delete raffle"><Trash2 size={16} /></button>
@@ -644,10 +665,18 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                 {tab === 'draw' && (
                   <section className={`raffle-draw-view ${isDrawing ? 'is-drawing' : ''}`} role="tabpanel">
                     <div className="raffle-draw-stage">
-                      <span className="raffle-draw-status">{isDrawing ? 'DRAW IN PROGRESS' : winner || winners[0] ? 'LATEST WINNER' : 'READY TO DRAW'}</span>
-                      {displayedEntry ? <><strong>{displayedEntry.participantName}</strong><span className="raffle-ticket-result"><Ticket size={18} /> Ticket {displayedEntry.ticketNumber}</span></> : <p>{eligible.length ? 'Press DRAW to start the randomizer.' : 'Register tickets before drawing a winner.'}</p>}
+                      <span className="raffle-draw-status">{isDrawing ? `DRAWING ${activeRaffle.drawWinnerCount} WINNER${activeRaffle.drawWinnerCount === 1 ? '' : 'S'}` : latestWinners.length ? 'LATEST WINNERS' : 'READY TO DRAW'}</span>
+                      {displayedEntry ? <><strong>{displayedEntry.participantName}</strong><span className="raffle-ticket-result"><Ticket size={18} /> Ticket {displayedEntry.ticketNumber}</span></> : !isDrawing && latestWinners.length > 1 ? (
+                        <ul className="raffle-draw-winners">
+                          {latestWinners.map((entry) => <li key={entry.id}><strong>{entry.participantName}</strong><span>Ticket {entry.ticketNumber}</span></li>)}
+                        </ul>
+                      ) : <p>{eligible.length ? 'Press DRAW to start the randomizer.' : 'Register tickets before drawing a winner.'}</p>}
                     </div>
                     <div className="raffle-draw-actions">
+                      <label className="raffle-winner-count" htmlFor="raffle-winner-count">
+                        Winners per draw
+                        <input id="raffle-winner-count" type="number" min={1} max={Math.max(1, eligible.length)} step={1} value={isDrawing ? activeRaffle.drawWinnerCount : winnerCount} onChange={(event) => setWinnerCount(event.target.value)} disabled={busy || isDrawing} />
+                      </label>
                       {!isDrawing ? <button className="button button-primary raffle-draw-button" onClick={() => void startDraw()} disabled={busy || eligible.length === 0}><Play size={18} /> DRAW</button> : <button className="button button-stop raffle-draw-button" onClick={() => void stopDraw()} disabled={busy}><Square size={17} fill="currentColor" /> STOP</button>}
                       <span>{eligible.length} eligible tickets · {winners.length} already won</span>
                     </div>

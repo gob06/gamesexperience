@@ -8,7 +8,7 @@ const duplicateTicketMessage = 'This ticket number has already been registered. 
 const registrationLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.RAFFLE_REGISTRATION_LIMIT_PER_MINUTE || 60) })
 
 const selectRaffle = database => database.prepare(`
-  SELECT id, title, draw_status AS drawStatus, created_at AS createdAt,
+  SELECT id, title, draw_status AS drawStatus, draw_winner_count AS drawWinnerCount, created_at AS createdAt,
     CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/logo?version=2') END AS logoUrl,
     CASE WHEN display_image_1 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/1?version=1') END AS displayImage1Url,
     CASE WHEN display_image_2 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/2?version=1') END AS displayImage2Url
@@ -20,6 +20,12 @@ function ticketKey(ticketNumber) {
   return ticketNumber.normalize('NFKC').replace(/\s+/g, '').toUpperCase()
 }
 
+function latestDrawWinners(winners) {
+  const latest = winners[0]
+  if (!latest) return []
+  return latest.drawId ? winners.filter((entry) => entry.drawId === latest.drawId) : [latest]
+}
+
 export function registerRaffleRoutes({ app, database, requireUser, imageUpload, hasValidImageSignature, inTransaction, audit }) {
   const getRaffle = selectRaffle(database)
 
@@ -27,6 +33,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     const raffles = await database.prepare(`
       SELECT raffle_sessions.id, raffle_sessions.title,
         raffle_sessions.draw_status AS drawStatus,
+        raffle_sessions.draw_winner_count AS drawWinnerCount,
         raffle_sessions.created_at AS createdAt,
         CASE WHEN raffle_sessions.logo IS NULL THEN NULL ELSE CONCAT('/api/raffles/', raffle_sessions.id, '/logo?version=2') END AS logoUrl,
         (SELECT COUNT(*) FROM raffle_entries WHERE raffle_id = raffle_sessions.id) AS entryCount,
@@ -105,11 +112,18 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
         FROM raffle_entries WHERE raffle_id = ?
       `).get(raffle.id),
       database.prepare(`
-        SELECT id, participant_name AS participantName, ticket_number AS ticketNumber, won_at AS wonAt
+        SELECT id, participant_name AS participantName, ticket_number AS ticketNumber, won_at AS wonAt, draw_id AS drawId
         FROM raffle_entries WHERE raffle_id = ? AND won_at IS NOT NULL
-        ORDER BY won_at DESC LIMIT 1
+        ORDER BY won_at DESC, id LIMIT 1
       `).get(raffle.id),
     ])
+    const latestWinners = latestWinner?.drawId
+      ? await database.prepare(`
+        SELECT id, participant_name AS participantName, ticket_number AS ticketNumber, won_at AS wonAt, draw_id AS drawId
+        FROM raffle_entries WHERE raffle_id = ? AND draw_id = ? AND won_at IS NOT NULL
+        ORDER BY id
+      `).all(raffle.id, latestWinner.drawId)
+      : latestWinner ? [latestWinner] : []
     const eligible = raffle.drawStatus === 'drawing'
       ? await database.prepare(`
         SELECT id, participant_name AS participantName, ticket_number AS ticketNumber
@@ -117,7 +131,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
         ORDER BY registered_at, id
       `).all(raffle.id)
       : []
-    response.set('Cache-Control', 'no-store').json({ raffle, counts, latestWinner: latestWinner || null, eligible })
+    response.set('Cache-Control', 'no-store').json({ raffle, counts, latestWinner: latestWinner || null, latestWinners, eligible })
   })
 
   app.post('/api/raffles/:id/register', registrationLimit, async (request, response) => {
@@ -164,15 +178,19 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     if (!raffle) return response.status(404).json({ error: 'This raffle could not be found.' })
     const entries = await database.prepare(`
       SELECT id, participant_name AS participantName, ticket_number AS ticketNumber,
-        registered_at AS registeredAt, won_at AS wonAt
+        registered_at AS registeredAt, won_at AS wonAt, draw_id AS drawId
       FROM raffle_entries WHERE raffle_id = ? ORDER BY registered_at, id
     `).all(raffle.id)
     const eligible = entries.filter((entry) => !entry.wonAt)
     const winners = entries.filter((entry) => entry.wonAt).sort((left, right) => right.wonAt.localeCompare(left.wonAt))
-    response.json({ raffle, entries, eligible, winners })
+    response.json({ raffle, entries, eligible, winners, latestWinners: latestDrawWinners(winners) })
   })
 
   app.post('/api/raffles/:id/draw/start', requireUser, async (request, response) => {
+    const winnerCount = request.body?.winnerCount === undefined ? 1 : request.body.winnerCount
+    if (!Number.isSafeInteger(winnerCount) || winnerCount < 1) {
+      return response.status(400).json({ error: 'Number of winners must be a whole number of at least 1.' })
+    }
     const result = await inTransaction(async () => {
       const raffle = await getRaffle.get(request.params.id)
       if (!raffle) return { error: 'missing' }
@@ -183,15 +201,18 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
         ORDER BY registered_at, id
       `).all(raffle.id)
       if (!eligible.length) return { error: 'no-eligible' }
-      await database.prepare('UPDATE raffle_sessions SET draw_status = ?, updated_at = ? WHERE id = ?').run('drawing', new Date().toISOString(), raffle.id)
+      if (winnerCount > eligible.length) return { error: 'too-many-winners' }
+      await database.prepare('UPDATE raffle_sessions SET draw_status = ?, draw_winner_count = ?, updated_at = ? WHERE id = ?')
+        .run('drawing', winnerCount, new Date().toISOString(), raffle.id)
       return { eligible }
     })
 
     if (result.error === 'missing') return response.status(404).json({ error: 'This raffle could not be found.' })
     if (result.error === 'already-drawing') return response.status(409).json({ error: 'A draw is already in progress.' })
     if (result.error === 'no-eligible') return response.status(409).json({ error: 'There are no eligible tickets left to draw.' })
-    await audit(request, 'raffle.draw.start', 'raffle', request.params.id)
-    response.json({ drawStatus: 'drawing', eligible: result.eligible })
+    if (result.error === 'too-many-winners') return response.status(409).json({ error: 'Number of winners cannot exceed the eligible tickets.' })
+    await audit(request, 'raffle.draw.start', 'raffle', request.params.id, { winnerCount })
+    response.json({ drawStatus: 'drawing', drawWinnerCount: winnerCount, eligible: result.eligible })
   })
 
   app.post('/api/raffles/:id/draw/stop', requireUser, async (request, response) => {
@@ -209,19 +230,28 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
         return { error: 'no-eligible' }
       }
 
-      const winner = eligible[randomInt(eligible.length)]
-      const marked = await database.prepare('UPDATE raffle_entries SET won_at = ? WHERE id = ? AND raffle_id = ? AND won_at IS NULL')
-        .run(now, winner.id, raffle.id)
-      if (marked.changes !== 1) return { error: 'race' }
+      if (raffle.drawWinnerCount > eligible.length) return { error: 'too-many-winners' }
+      const drawId = randomUUID()
+      const winners = []
+      for (let index = 0; index < raffle.drawWinnerCount; index++) {
+        const selectedIndex = randomInt(eligible.length)
+        const winner = eligible[selectedIndex]
+        eligible[selectedIndex] = eligible[eligible.length - 1]
+        eligible.pop()
+        const marked = await database.prepare('UPDATE raffle_entries SET won_at = ?, draw_id = ? WHERE id = ? AND raffle_id = ? AND won_at IS NULL')
+          .run(now, drawId, winner.id, raffle.id)
+        if (marked.changes !== 1) throw new Error('A selected raffle ticket could not be marked as a winner.')
+        winners.push({ ...winner, wonAt: now, drawId })
+      }
       await database.prepare('UPDATE raffle_sessions SET draw_status = ?, updated_at = ? WHERE id = ?').run('idle', now, raffle.id)
-      return { winner: { ...winner, wonAt: now } }
+      return { winners }
     })
 
     if (result.error === 'missing') return response.status(404).json({ error: 'This raffle could not be found.' })
     if (result.error === 'not-drawing') return response.status(409).json({ error: 'Start a draw before stopping it.' })
     if (result.error === 'no-eligible') return response.status(409).json({ error: 'There are no eligible tickets left to draw.' })
-    if (result.error === 'race') return response.status(409).json({ error: 'The ticket was already selected. Start another draw.' })
-    await audit(request, 'raffle.draw.winner', 'raffle', request.params.id, { ticketNumber: result.winner.ticketNumber })
-    response.json({ drawStatus: 'idle', winner: result.winner })
+    if (result.error === 'too-many-winners') return response.status(409).json({ error: 'There are not enough eligible tickets for this draw.' })
+    await audit(request, 'raffle.draw.winner', 'raffle', request.params.id, { winnerCount: result.winners.length, ticketNumbers: result.winners.map((entry) => entry.ticketNumber) })
+    response.json({ drawStatus: 'idle', winner: result.winners[0], winners: result.winners })
   })
 }

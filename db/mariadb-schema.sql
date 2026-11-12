@@ -286,6 +286,7 @@ ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_1_mime_type V
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_1 LONGBLOB NULL;
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_2_mime_type VARCHAR(100) NULL;
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_2 LONGBLOB NULL;
+ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS draw_winner_count INT NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS raffle_entries (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -300,6 +301,8 @@ CREATE TABLE IF NOT EXISTS raffle_entries (
   INDEX raffle_entries_raffle_won (raffle_id, won_at),
   FOREIGN KEY (raffle_id) REFERENCES raffle_sessions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+ALTER TABLE raffle_entries ADD COLUMN IF NOT EXISTS draw_id VARCHAR(64) NULL;
 
 CREATE TABLE IF NOT EXISTS scramble_games (
   id VARCHAR(64) NOT NULL PRIMARY KEY,

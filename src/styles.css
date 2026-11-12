@@ -1893,6 +1893,25 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-event:has(.raffle-screen-side-image) h1 { grid-column: 2; grid-row: 1; }
 .raffle-screen-side-image { grid-row: 1; }
 
+.raffle-winner-count { display: flex; align-items: center; gap: 12px; color: #d6d3db; font-size: 14px; }
+.raffle-winner-count input { width: 90px; padding: 10px; }
+.raffle-draw-winners { width: 100%; display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.raffle-draw-winners li { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; overflow-wrap: anywhere; }
+.raffle-draw-winners strong { color: #f5f6fa; }
+.raffle-draw-winners span { color: #a9a4b0; }
+.raffle-screen-winners { align-self: stretch; display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; }
+.raffle-screen-winners h2 { flex: 0 0 auto; margin: 0 0 16px; color: #00d9ff; font-size: clamp(24px, 4vh, 48px); }
+.raffle-screen-winner-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; margin: 0; padding: 4px; overflow-y: auto; list-style: none; text-align: left; }
+.raffle-screen-winner-list li { flex: 0 0 auto; display: grid; grid-template-columns: minmax(60px, .2fr) minmax(0, 1fr) minmax(0, .6fr); align-items: center; gap: 20px; padding: 20px 24px; border: 1px solid rgba(0, 217, 255, .62); border-radius: 8px; background: rgba(5, 11, 53, .88); }
+.raffle-screen-winner-list strong { min-width: 0; font: 800 clamp(24px, 3vw, 48px)/1.15 'Fraunces', Georgia, serif; overflow-wrap: anywhere; }
+.raffle-screen-winner-rank { display: inline-flex; align-items: center; gap: 8px; color: #00d9ff; font-size: clamp(20px, 2.5vw, 36px); }
+.raffle-screen-winner-rank svg { width: 1em; height: 1em; flex: 0 0 auto; }
+.raffle-screen-winner-list .raffle-screen-ticket { font-size: clamp(18px, 2.5vw, 36px); text-align: left; }
+@media (max-width: 600px) {
+  .raffle-screen-winner-list li { grid-template-columns: 40px minmax(0, 1fr); gap: 8px 12px; padding: 16px; }
+  .raffle-screen-winner-list .raffle-screen-ticket { grid-column: 2; }
+}
+
 /* === QR Word Scramble === */
 .scramble-activity .activity-card-icon { border-color: #c6f24e33; color: #c6f24e; background: #c6f24e14; }
 .scramble-activity .activity-card-action { color: #c6f24e; }

@@ -37,6 +37,18 @@ If `SQLITE_PATH` is omitted, the database defaults to `data/roomvote-local.sqlit
 
 On first visit, create the initial admin account. Usernames must be 3–40 letters, numbers, dots, dashes, or underscores; passwords must be at least 12 characters. Sign in to access the dashboard. Admins can open **Manage users** to add more admins or hosts. Hosts can create polls but cannot manage accounts. Sessions expire after seven days.
 
+## QR Raffle
+
+Open **QR Raffle** from the host/admin dashboard (`/raffle`), create a raffle, and share its registration QR. Ticket holders register their name and ticket number once.
+
+In **Live randomizer**, set **Winners per draw** to a whole number from 1 to the remaining eligible ticket count, press **DRAW**, then **STOP**. The count is saved when the draw starts and cannot change during that draw. The server randomly selects that many distinct tickets; previous winners are excluded from all later draws.
+
+**Open display** (`/raffle/:id/display`) shows the registration QR before the first draw, the randomizer during drawing, and the latest draw's complete winner list afterward, with one row per winner showing their number, name, and ticket number, like the host results. This row layout also applies to single-winner draws. The list survives a display refresh; large lists can be scrolled. The host sees the latest winners in the randomizer and all past winners in **Winners**. Restart the updated API to apply the database columns automatically; existing raffles default to one winner per draw.
+
+Validate the raffle API with `node --test server/raffle.test.mjs`.
+
+If the raffle page reports that the server is out of date after an update, stop the running local dev command with `Ctrl+C`, run `npm run dev` again, and refresh the browser. Vite reloads frontend changes automatically, but the Node API must be restarted to load backend changes and apply database updates.
+
 ## Vanishing Tic-Tac-Toe
 
 Admins can manage up to three active Vanishing Tic-Tac-Toe rooms at `/game`. Use **Game Appearance & Theme** there to separately customize the game title, images, colors, background, layout, and effects; save a private draft, preview desktop/mobile, and publish changes only to game pages. This game theme does not change the main site or voting theme. Give each room a name and optionally upload custom X and O images (JPEG, PNG, or WebP, up to 5 MB each); the images are validated by the server, stored in MariaDB, and shown on both player boards and the admin spectator board. Each room has its own QR code for both players to scan; the first player is X and the second is O. Admins can reopen a room QR code and open a read-only spectator view; spectator access requires the admin account and does not occupy a player slot. Admins can close rooms to free a slot; closing a room disconnects both players. Both boards synchronize through the server. Each player keeps up to three active marks during play; on a non-winning fourth move in an empty square, their oldest mark disappears. If the move makes three-in-a-row, the winning marks stay on the board and the game ends. After a match, both players can vote on a rematch during a shared 20-second countdown; the same room restarts only if both agree. A decline or timeout leaves the finished game in place. Rooms with no activity expire after 24 hours and no longer count against the three-room limit. For phones to join a locally hosted game, all devices need to be on the same Wi-Fi network.
