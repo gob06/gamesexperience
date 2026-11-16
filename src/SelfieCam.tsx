@@ -18,7 +18,8 @@ const SantaOverlay = lazy(() => import('./SantaOverlay').catch((error: unknown) 
   return { default: SantaLoadError }
 }))
 
-type SelfieSession = { id: string; joinToken: string; displayToken: string; expiresAt: string }
+type SelfieSession = { id: string; joinToken: string; displayToken: string; createdAt: string; closedAt: string | null; paused: boolean }
+type RecentSession = { id: string; host: string; createdAt: string; closedAt: string | null; paused: boolean; photoCount: number; approvedCount: number; santaEnabled: boolean }
 type SelfieSubmission = { id: string; fileName: string; status: 'pending' | 'approved'; createdAt: string }
 
 export async function getSelfieJoinUrl(token: string) {
@@ -41,6 +42,10 @@ export default function SelfieCam() {
   const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [bannerPreview, setBannerPreview] = useState('')
   const [session, setSession] = useState<SelfieSession | null>(null)
+  const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(true)
+  const [sessionsError, setSessionsError] = useState('')
+  const selectedSessionId = useRef<string | null>(null)
   const [joinUrl, setJoinUrl] = useState('')
   const [qrLogoUrl, setQrLogoUrl] = useState('')
   const [submissions, setSubmissions] = useState<SelfieSubmission[]>([])
@@ -50,6 +55,48 @@ export default function SelfieCam() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [paused, setPaused] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    let timer: number
+    async function refresh() {
+      try {
+        const response = await fetch('/api/selfie/sessions', { cache: 'no-store' })
+        const result = await response.json() as { sessions?: RecentSession[]; error?: string }
+        if (!response.ok || !result.sessions) throw new Error(result.error || 'Could not load recent selfie sessions.')
+        if (active) { setRecentSessions(result.sessions); setSessionsError('') }
+      } catch (caught) {
+        if (active) setSessionsError(caught instanceof Error ? caught.message : 'Could not load recent selfie sessions.')
+      } finally {
+        if (active) { setSessionsLoading(false); timer = window.setTimeout(() => void refresh(), 3000) }
+      }
+    }
+    void refresh()
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [])
+
+  async function selectSession(id: string) {
+    setLoading(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(id)}/links`, { method: 'POST' })
+      const result = await response.json() as SelfieSession & { error?: string }
+      if (!response.ok || !result.id || !result.joinToken || !result.displayToken) throw new Error(result.error || 'Could not open this selfie session.')
+      const url = await getSelfieJoinUrl(result.joinToken)
+      selectedSessionId.current = result.id
+      setSession(result)
+      setJoinUrl(url)
+      setPaused(result.paused)
+      setSubmissions([])
+      setDisplaySubmission(null)
+      setQrLogoUrl(localStorage.getItem(`selfie-qr-logo:${result.id}`) || '')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not open this selfie session.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   async function togglePause() {
     if (!session) return
@@ -146,7 +193,9 @@ export default function SelfieCam() {
       } catch {
         // The live screen simply shows a plain QR if the logo can't be stored.
       }
+      selectedSessionId.current = result.id
       setSession(result)
+      setPaused(false)
       setJoinUrl(url)
       setSubmissions([])
       setDisplaySubmission(null)
@@ -160,16 +209,14 @@ export default function SelfieCam() {
   async function refreshSubmissions(sessionId: string) {
     try {
       const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions`)
-      const result = await response.json() as { submissions?: SelfieSubmission[]; closed?: boolean; error?: string }
+      const result = await response.json() as { submissions?: SelfieSubmission[]; closed?: boolean; closedAt?: string | null; paused?: boolean; error?: string }
+      if (selectedSessionId.current !== sessionId) return
       if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load selfie submissions.')
       setSubmissions(result.submissions)
-      setPaused(Boolean((result as { paused?: boolean }).paused))
-      if (result.closed) {
-        setNotice('This selfie session has ended.')
-        setSession(null)
-      }
+      setPaused(Boolean(result.paused))
+      setSession((current) => current?.id === sessionId ? { ...current, closedAt: result.closedAt || null } : current)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not refresh selfie submissions.')
+      if (selectedSessionId.current === sessionId) setError(caught instanceof Error ? caught.message : 'Could not refresh selfie submissions.')
     }
   }
 
@@ -281,13 +328,35 @@ export default function SelfieCam() {
       const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(session.id)}/close`, { method: 'POST' })
       const result = response.status === 204 ? null : await response.json() as { error?: string }
       if (!response.ok) throw new Error(result?.error || 'Could not end the selfie session.')
-      setSession(null)
-      setJoinUrl('')
-      setSubmissions([])
-      setDisplaySubmission(null)
-      setNotice('Selfie session ended.')
+      await refreshSubmissions(session.id)
+      setNotice('Selfie session ended. Photos remain playable; the live screen uses the newest ongoing session from the same host for its QR.')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not end the selfie session.')
+    }
+  }
+
+  async function deleteSession() {
+    if (!session?.closedAt || loading || !window.confirm('Permanently delete this ended session and all its photos? Its OBS links will stop working. This cannot be undone.')) return
+    const id = session.id
+    setLoading(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const result = response.status === 204 ? null : await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result?.error || 'Could not delete the selfie session.')
+      selectedSessionId.current = null
+      setSession(null)
+      setRecentSessions((current) => current.filter((recent) => recent.id !== id))
+      setSubmissions([])
+      setDisplaySubmission(null)
+      setJoinUrl('')
+      setPaused(false)
+      setNotice('Selfie session and all its photos permanently deleted.')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not delete the selfie session.')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -318,12 +387,34 @@ export default function SelfieCam() {
           <p>Create a QR code for guests. Review each photo before approving it for the big screen.</p>
         </section>
 
+        <section className="selfie-panel selfie-history" aria-label="Recent selfie sessions">
+          <div className="selfie-session-heading">
+            <div><h2>Recent sessions</h2><p>Open a session to review its photos or reuse its OBS display.</p></div>
+            <button className="button button-secondary" type="button" disabled={loading} onClick={() => {
+              selectedSessionId.current = null
+              setSession(null); setSubmissions([]); setDisplaySubmission(null); setJoinUrl(''); setError(''); setNotice('')
+            }}>New session</button>
+          </div>
+          {sessionsError && <p className="selfie-error" role="alert">{sessionsError}</p>}
+          {sessionsLoading ? <p role="status">Loading sessions...</p> : !recentSessions.length ? <p>No sessions yet.</p> : (
+            <nav className="selfie-monitor-sessions selfie-history-list" aria-label="Choose a selfie session">
+              {recentSessions.map((recent) => (
+                <button className="button button-secondary" type="button" key={recent.id} disabled={loading} aria-pressed={session?.id === recent.id} onClick={() => void selectSession(recent.id)}>
+                  <strong>{recent.host} - {recent.santaEnabled ? 'Santa selfie' : 'Selfie Cam'}</strong>
+                  <span>{new Date(recent.createdAt).toLocaleString()} | {recent.closedAt ? 'Ended' : recent.paused ? 'Paused' : 'Uploads open'}</span>
+                  <span>{recent.photoCount} photos | {recent.approvedCount} approved</span>
+                </button>
+              ))}
+            </nav>
+          )}
+        </section>
+
         <section className="selfie-panel">
           {!session ? (
             <div className="selfie-empty">
               <span className="selfie-empty-icon"><QrCode size={26} /></span>
               <h2>Start a selfie session</h2>
-              <p>Guests scan your QR code to submit photos. Submissions are private until you approve them. Sessions last up to four hours.</p>
+              <p>Guests scan your QR code to submit photos. Submissions are private until you approve them. Uploads stay open until the host or an admin ends the session.</p>
               <input ref={logoInputRef} className="selfie-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseQrLogo} aria-label="Upload a logo for the selfie QR code" />
               <div className="selfie-qr-logo-picker">
                 {qrLogoUrl ? <img src={qrLogoUrl} alt="QR code logo preview" /> : <ImagePlus size={20} />}
@@ -342,18 +433,20 @@ export default function SelfieCam() {
             </div>
           ) : (
             <div className="selfie-host-session">
-              <div className="selfie-session-heading"><div><span className="selfie-session-label">GUEST UPLOAD QR</span><h2>Scan to submit a selfie</h2></div><div className="selfie-session-buttons"><button className="button button-secondary" type="button" onClick={() => void togglePause()}>{paused ? <Play size={15} /> : <Pause size={15} />} {paused ? 'Resume session' : 'Pause session'}</button><button className="button button-quiet selfie-end-button" type="button" onClick={() => void endSession()}><X size={15} /> End session</button></div></div>
-              {paused && <p className="selfie-paused-note">Session paused — guests can't upload and the live screen is holding its current photo.</p>}
+              <div className="selfie-session-heading"><div><span className="selfie-session-label">{session.closedAt ? 'SAVED SESSION' : 'GUEST UPLOAD QR'}</span><h2>{session.closedAt ? 'Session ended - photos saved' : 'Scan to submit a selfie'}</h2></div><div className="selfie-session-buttons"><button className="button button-secondary" type="button" disabled={loading} onClick={() => void togglePause()}>{paused ? <Play size={15} /> : <Pause size={15} />} {paused ? 'Resume display' : session.closedAt ? 'Pause display' : 'Pause session'}</button>{session.closedAt ? <button className="button button-quiet selfie-end-button" type="button" disabled={loading} onClick={() => void deleteSession()}><Trash2 size={15} /> {loading ? 'Deleting...' : 'Delete session'}</button> : <button className="button button-quiet selfie-end-button" type="button" onClick={() => void endSession()}><X size={15} /> End session</button>}</div></div>
+              {paused && <p className="selfie-paused-note">{session.closedAt ? 'Display paused on its current photo.' : "Session paused — guests can't upload and the live screen is holding its current photo."}</p>}
               <div className="selfie-session-share">
+                {!session.closedAt && <>
                 <div className="selfie-qr-frame"><canvas ref={qrCanvasRef} aria-label="Scan this QR code to submit a selfie" /></div>
                 <p>Scan with a phone camera. Photos must be approved before they appear on screen.</p>
                 <a href={joinUrl} target="_blank" rel="noreferrer">Open guest upload page</a>
-                <a className="button button-primary" href={liveScreenUrl} target="_blank" rel="noreferrer"><Maximize size={15} /> Open live screen (QR + photos)</a>
+                </>}
+                <a className="button button-primary" href={liveScreenUrl} target="_blank" rel="noreferrer"><Maximize size={15} /> Open live screen {session.closedAt ? '(saved photos)' : '(QR + photos)'}</a>
                 <button className="button button-secondary" type="button" onClick={() => void copyLiveScreenUrl()}><Copy size={15} /> Copy OBS URL</button>
                 <label htmlFor="selfie-obs-url">OBS Browser Source URL</label>
                 <input id="selfie-obs-url" type="text" readOnly value={liveScreenUrl} onFocus={(event) => event.currentTarget.select()} />
-                <p>In OBS, add a Browser Source, paste this entire URL, and set its size to 1920 × 1080. Opening the live screen only opens a browser tab; it does not add an OBS source. Keep this link private: it grants read-only access to approved photos until the session ends.</p>
-                <span className="selfie-expiry">Session ends {new Date(session.expiresAt).toLocaleTimeString()}</span>
+                <p>In OBS, add a Browser Source, paste this entire URL, and set its size to 1920 × 1080. Opening the live screen only opens a browser tab; it does not add an OBS source. Keep this link private: it grants read-only access to approved photos, including after uploads end. Previously copied OBS URLs continue to work. Ended-session displays show the newest ongoing session from the same host as their upload QR, while continuing to play the ended session's photos.</p>
+                <span className="selfie-expiry">{session.closedAt ? `Uploads ended ${new Date(session.closedAt).toLocaleString()}` : 'No time limit - uploads stay open until you end the session.'}</span>
               </div>
               <div className="selfie-review-heading"><h3>Photo review</h3><span>{pendingSubmissions.length} waiting · {approvedSubmissions.length} approved</span></div>
               {submissions.length === 0 ? <p className="selfie-empty-submissions">Waiting for guests to submit photos…</p> : (
@@ -411,15 +504,21 @@ export function SelfieParticipant({ token }: { token: string }) {
   const [showAd, setShowAd] = useState(false)
   const [bannerOk, setBannerOk] = useState(true)
   const [uploadsPaused, setUploadsPaused] = useState(false)
+  const [uploadsClosed, setUploadsClosed] = useState(false)
 
   useEffect(() => {
     let active = true
     santaModeRef.current = null
     setSantaEnabled(false)
     setWithSanta(false)
+    setUploadsClosed(false)
     async function check() {
       try {
         const response = await fetch(`/api/selfie/join/${encodeURIComponent(token)}/status`, { cache: 'no-store' })
+        if (response.status === 404) {
+          if (active) setUploadsClosed(true)
+          return
+        }
         if (!response.ok) return
         const result = await response.json() as { paused?: boolean; santaEnabled?: boolean }
         if (active) {
@@ -445,6 +544,10 @@ export function SelfieParticipant({ token }: { token: string }) {
     setCameraActive(false)
     setSantaReady(false)
   }
+
+  useEffect(() => {
+    if (uploadsClosed) stopCamera()
+  }, [uploadsClosed])
 
   function selectPhoto(file: File) {
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
@@ -534,7 +637,7 @@ export function SelfieParticipant({ token }: { token: string }) {
   const santaWidth = santaHeight * videoSize.height / videoSize.width / 2
 
   async function submitPhoto() {
-    if (!photo || submitting) return
+    if (!photo || submitting || uploadsClosed) return
     setSubmitting(true)
     setError('')
     try {
@@ -562,6 +665,7 @@ export function SelfieParticipant({ token }: { token: string }) {
           <section className="selfie-heading"><span className="activity-eyebrow"><Camera size={15} /> SELFIE CAM</span><h1>Share your moment.</h1><p>Your photo goes to the host for review and will only appear on the big screen if approved.</p></section>
         )}
         <section className="selfie-panel">
+          {uploadsClosed ? <p className="selfie-paused-note" role="status">This selfie session has ended. New photos can no longer be submitted.</p> : <>
           {uploadsPaused && <p className="selfie-paused-note">The host has paused uploads for now. Please wait a moment.</p>}
           <input ref={fileInputRef} className="selfie-file-input" type="file" accept="image/jpeg,image/png,image/webp" capture="user" onChange={(event) => {
             const file = event.currentTarget.files?.[0]
@@ -595,6 +699,7 @@ export function SelfieParticipant({ token }: { token: string }) {
           ) : (
             <div className="selfie-empty"><span className="selfie-empty-icon"><Camera size={26} /></span><h2>Share your picture and get on the big screen.</h2><div className="selfie-controls"><button className="button button-primary" type="button" onClick={() => void startCamera()}><Camera size={16} /> Open camera</button><button className="button button-secondary" type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={16} /> Choose a photo</button></div></div>
           )}
+          </>}
           {error && <p className="selfie-error" role="alert">{error}</p>}
         </section>
       </div>

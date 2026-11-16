@@ -21,6 +21,7 @@ const tableNames = [
   'game_theme_settings',
   'selfie_sessions',
   'selfie_submissions',
+  'selfie_session_links',
   'theme_assets',
   'theme_audit_logs',
   'ad_videos',

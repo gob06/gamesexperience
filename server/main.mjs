@@ -45,14 +45,13 @@ const database = await createDatabase(readDatabaseConfig())
 await database.initializeSchema()
 const inTransaction = (action) => database.transaction(action)
 
+// Derive a stable guest-only QR without storing raw tokens or issuing links on every refresh.
+function selfieLiveJoinToken(joinTokenHash) {
+  return createHash('sha256').update('selfie-live-join:').update(joinTokenHash).digest('base64url')
+}
+
 const gameRoomRetentionMs = 24 * 60 * 60 * 1000
 await database.prepare('DELETE FROM game_rooms WHERE updated_at <= ?').run(new Date(Date.now() - gameRoomRetentionMs).toISOString())
-await database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(new Date().toISOString())
-const selfieCleanupTimer = setInterval(() => {
-  database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(new Date().toISOString())
-    .catch((error) => console.error('Selfie session cleanup failed:', error))
-}, 15 * 60 * 1000)
-selfieCleanupTimer.unref()
 
 app.use((_request, response, next) => {
   response.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'SAMEORIGIN' })
@@ -265,6 +264,11 @@ async function getPublicGameTheme() {
 
 const sessionDurationSeconds = 60 * 60 * 24 * 7
 const hashSessionToken = (token) => createHash('sha256').update(token).digest('hex')
+
+for (const session of await database.prepare('SELECT id, join_token_hash AS joinTokenHash FROM selfie_sessions WHERE live_join_token_hash IS NULL').all()) {
+  await database.prepare('UPDATE selfie_sessions SET live_join_token_hash = ? WHERE id = ?')
+    .run(hashSessionToken(selfieLiveJoinToken(session.joinTokenHash)), session.id)
+}
 
 function publicUser(user) {
   return { id: user.id, username: user.username, role: user.role }
@@ -956,37 +960,83 @@ app.get('/api/admin/theme/audit', requireAdmin, async (_request, response) => {
   response.json(entries.map((entry) => ({ ...entry, details: JSON.parse(entry.details) })))
 })
 
-function getSelfieSessionForOwner(sessionId, userId) {
+function getSelfieSessionForOwner(sessionId, user) {
   return database.prepare(`
-    SELECT id, expires_at AS expiresAt, closed_at AS closedAt, paused
+    SELECT id, owner_user_id AS ownerUserId, created_at AS createdAt, closed_at AS closedAt, paused, santa_enabled AS santaEnabled
     FROM selfie_sessions
-    WHERE id = ? AND owner_user_id = ?
-  `).get(sessionId, userId)
+    WHERE id = ? AND (owner_user_id = ? OR ? = 'admin')
+  `).get(sessionId, user.id, user.role)
+}
+
+function getSelfieSessionForJoin(token) {
+  const hash = hashSessionToken(token)
+  return database.prepare(`
+    SELECT id, closed_at AS closedAt, paused, santa_enabled AS santaEnabled
+    FROM selfie_sessions WHERE join_token_hash = ? OR live_join_token_hash = ? OR id IN (
+      SELECT session_id FROM selfie_session_links WHERE join_token_hash = ?
+    )
+  `).get(hash, hash, hash)
+}
+
+async function getSelfieDisplayQr(session) {
+  if (!session.closedAt) return null
+  const ongoing = await database.prepare(`
+    SELECT id, join_token_hash AS joinTokenHash, paused FROM selfie_sessions
+    WHERE owner_user_id = ? AND closed_at IS NULL
+    ORDER BY created_at DESC, id DESC LIMIT 1
+  `).get(session.ownerUserId)
+  return ongoing ? { id: ongoing.id, joinToken: selfieLiveJoinToken(ongoing.joinTokenHash), paused: Boolean(ongoing.paused) } : null
 }
 
 app.post('/api/selfie/sessions/:id/pause', requireUser, async (request, response) => {
-  const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
-  if (!session || session.closedAt || Date.parse(session.expiresAt) <= Date.now()) {
-    return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
-  }
+  const session = await getSelfieSessionForOwner(request.params.id, request.user)
+  if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
   const paused = request.body?.paused === true ? 1 : 0
   await database.prepare('UPDATE selfie_sessions SET paused = ? WHERE id = ?').run(paused, session.id)
   response.json({ paused: Boolean(paused) })
 })
 
-app.get('/api/admin/selfie/sessions', requireAdmin, async (_request, response) => {
-  const now = new Date().toISOString()
+app.get('/api/selfie/sessions', requireUser, async (request, response) => {
   const sessions = await database.prepare(`
-    SELECT sess.id, u.username AS host, sess.created_at AS createdAt, sess.expires_at AS expiresAt,
+    SELECT sess.id, u.username AS host, sess.created_at AS createdAt, sess.closed_at AS closedAt,
+      sess.paused, sess.santa_enabled AS santaEnabled,
+      (SELECT COUNT(*) FROM selfie_submissions sub WHERE sub.session_id = sess.id) AS photoCount,
+      (SELECT COUNT(*) FROM selfie_submissions sub WHERE sub.session_id = sess.id AND sub.status = 'approved') AS approvedCount
+    FROM selfie_sessions sess JOIN users u ON u.id = sess.owner_user_id
+    WHERE sess.owner_user_id = ? OR ? = 'admin'
+    ORDER BY sess.created_at DESC, sess.id DESC
+  `).all(request.user.id, request.user.role)
+  response.set('Cache-Control', 'no-store').json({
+    sessions: sessions.map((session) => ({ ...session, paused: Boolean(session.paused), santaEnabled: Boolean(session.santaEnabled) })),
+  })
+})
+
+app.post('/api/selfie/sessions/:id/links', requireUser, async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.id, request.user)
+  if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
+  const joinToken = randomBytes(32).toString('base64url')
+  const displayToken = randomBytes(32).toString('base64url')
+  await database.prepare(`
+    INSERT INTO selfie_session_links (session_id, join_token_hash, display_token_hash, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run(session.id, hashSessionToken(joinToken), hashSessionToken(displayToken), new Date().toISOString())
+  response.set('Cache-Control', 'no-store').json({
+    id: session.id, createdAt: session.createdAt, closedAt: session.closedAt,
+    paused: Boolean(session.paused), santaEnabled: Boolean(session.santaEnabled), joinToken, displayToken,
+  })
+})
+
+app.get('/api/admin/selfie/sessions', requireAdmin, async (_request, response) => {
+  const sessions = await database.prepare(`
+    SELECT sess.id, u.username AS host, sess.created_at AS createdAt, sess.closed_at AS closedAt,
       sess.paused, sess.santa_enabled AS santaEnabled
     FROM selfie_sessions sess JOIN users u ON u.id = sess.owner_user_id
-    WHERE sess.closed_at IS NULL AND sess.expires_at > ? ORDER BY sess.created_at DESC
-  `).all(now)
+    ORDER BY sess.created_at DESC, sess.id DESC
+  `).all()
   const photos = await database.prepare(`
     SELECT sub.id, sub.session_id AS sessionId, sub.status, sub.created_at AS createdAt, sub.approved_at AS approvedAt
-    FROM selfie_submissions sub JOIN selfie_sessions sess ON sess.id = sub.session_id
-    WHERE sess.closed_at IS NULL AND sess.expires_at > ? ORDER BY sub.created_at DESC
-  `).all(now)
+    FROM selfie_submissions sub ORDER BY sub.created_at DESC
+  `).all()
   response.set('Cache-Control', 'no-store').json({
     sessions: sessions.map((session) => ({
       ...session, paused: Boolean(session.paused), santaEnabled: Boolean(session.santaEnabled),
@@ -999,17 +1049,17 @@ app.get('/api/admin/selfie/sessions/:sessionId/photos/:photoId/image', requireAd
   const photo = await database.prepare(`
     SELECT sub.image, sub.image_mime_type AS mimeType
     FROM selfie_submissions sub JOIN selfie_sessions sess ON sess.id = sub.session_id
-    WHERE sub.id = ? AND sub.session_id = ? AND sess.closed_at IS NULL AND sess.expires_at > ?
-  `).get(request.params.photoId, request.params.sessionId, new Date().toISOString())
-  if (!photo) return response.status(404).json({ error: 'This active session photo could not be found.' })
+    WHERE sub.id = ? AND sub.session_id = ?
+  `).get(request.params.photoId, request.params.sessionId)
+  if (!photo) return response.status(404).json({ error: 'This session photo could not be found.' })
   response.type(photo.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(photo.image))
 })
 
 app.get('/api/selfie/join/:token/status', async (request, response) => {
   const token = request.params.token
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).end()
-  const row = await database.prepare('SELECT paused, santa_enabled AS santaEnabled, expires_at AS expiresAt, closed_at AS closedAt FROM selfie_sessions WHERE join_token_hash = ?').get(hashSessionToken(token))
-  if (!row || row.closedAt || Date.parse(row.expiresAt) <= Date.now()) return response.status(404).end()
+  const row = await getSelfieSessionForJoin(token)
+  if (!row || row.closedAt) return response.status(404).end()
   response.set('Cache-Control', 'no-store').json({ paused: Boolean(row.paused), santaEnabled: Boolean(row.santaEnabled) })
 })
 
@@ -1017,20 +1067,19 @@ app.post('/api/selfie/sessions', requireUser, async (request, response) => {
   const santaEnabled = request.body?.santaEnabled ?? false
   if (typeof santaEnabled !== 'boolean') return response.status(400).json({ error: 'Santa effect must be enabled or disabled.' })
   const now = new Date()
-  await database.prepare('DELETE FROM selfie_sessions WHERE expires_at <= ? OR closed_at IS NOT NULL').run(now.toISOString())
   const sessionId = randomUUID()
   const joinToken = randomBytes(32).toString('base64url')
   const displayToken = randomBytes(32).toString('base64url')
-  const expiresAt = new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString()
+  // Keep the legacy NOT NULL expiry column populated; only closed_at controls uploads.
   await database.prepare(`
-    INSERT INTO selfie_sessions (id, join_token_hash, display_token_hash, owner_user_id, created_at, expires_at, santa_enabled)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(sessionId, hashSessionToken(joinToken), hashSessionToken(displayToken), request.user.id, now.toISOString(), expiresAt, Number(santaEnabled))
-  response.status(201).json({ id: sessionId, joinToken, displayToken, expiresAt, santaEnabled })
+    INSERT INTO selfie_sessions (id, join_token_hash, display_token_hash, owner_user_id, created_at, expires_at, santa_enabled, live_join_token_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(sessionId, hashSessionToken(joinToken), hashSessionToken(displayToken), request.user.id, now.toISOString(), now.toISOString(), Number(santaEnabled), hashSessionToken(selfieLiveJoinToken(hashSessionToken(joinToken))))
+  response.set('Cache-Control', 'no-store').status(201).json({ id: sessionId, joinToken, displayToken, createdAt: now.toISOString(), closedAt: null, paused: false, santaEnabled })
 })
 
 app.post('/api/selfie/sessions/:id/banner', requireUser, imageUpload.single('image'), async (request, response) => {
-  const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
+  const session = await getSelfieSessionForOwner(request.params.id, request.user)
   if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
   const { file } = request
   if (!file || !hasValidImageSignature(file.mimetype, file.buffer)) {
@@ -1043,24 +1092,19 @@ app.post('/api/selfie/sessions/:id/banner', requireUser, imageUpload.single('ima
 app.get('/api/selfie/join/:token/banner', async (request, response) => {
   const token = request.params.token
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).end()
-  const row = await database.prepare(`
-    SELECT banner, banner_mime_type AS mimeType, expires_at AS expiresAt, closed_at AS closedAt
-    FROM selfie_sessions WHERE join_token_hash = ?
-  `).get(hashSessionToken(token))
-  if (!row?.banner || row.closedAt || Date.parse(row.expiresAt) <= Date.now()) return response.status(404).end()
+  const session = await getSelfieSessionForJoin(token)
+  if (!session || session.closedAt) return response.status(404).end()
+  const row = await database.prepare('SELECT banner, banner_mime_type AS mimeType FROM selfie_sessions WHERE id = ?').get(session.id)
+  if (!row?.banner) return response.status(404).end()
   response.type(row.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(row.banner))
 })
 
 app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request, response) => {
   const token = request.params.token
-  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).json({ error: 'This selfie session is invalid or has expired.' })
-  const session = await database.prepare(`
-    SELECT id, expires_at AS expiresAt, closed_at AS closedAt, paused
-    FROM selfie_sessions
-    WHERE join_token_hash = ?
-  `).get(hashSessionToken(token))
-  if (!session || session.closedAt || Date.parse(session.expiresAt) <= Date.now()) {
-    return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).json({ error: 'This selfie session link is invalid.' })
+  const session = await getSelfieSessionForJoin(token)
+  if (!session || session.closedAt) {
+    return response.status(404).json({ error: 'This selfie session has ended.' })
   }
   if (session.paused) return response.status(423).json({ error: 'The host has paused photo uploads. Please try again shortly.' })
   const { file } = request
@@ -1075,9 +1119,9 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request,
   const id = randomUUID()
   const submitted = await inTransaction(async () => {
     const currentSession = await database.prepare(`
-      SELECT id, expires_at AS expiresAt, closed_at AS closedAt, paused FROM selfie_sessions WHERE id = ?
+      SELECT id, closed_at AS closedAt, paused FROM selfie_sessions WHERE id = ?
     `).get(session.id)
-    if (!currentSession || currentSession.closedAt || Date.parse(currentSession.expiresAt) <= Date.now()) return 'closed'
+    if (!currentSession || currentSession.closedAt) return 'closed'
     if (currentSession.paused) return 'paused'
     const submissionCount = (await database.prepare('SELECT count(*) AS count FROM selfie_submissions WHERE session_id = ?').get(session.id)).count
     if (submissionCount >= 100) return 'limit'
@@ -1087,7 +1131,7 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request,
     `).run(id, session.id, file.mimetype, file.buffer, file.originalname.slice(0, 120), new Date().toISOString())
     return 'created'
   })
-  if (submitted === 'closed') return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
+  if (submitted === 'closed') return response.status(404).json({ error: 'This selfie session has ended.' })
   if (submitted === 'paused') return response.status(423).json({ error: 'The host has paused photo uploads. Please try again shortly.' })
   if (submitted === 'limit') return response.status(429).json({ error: 'This selfie session has reached its submission limit.' })
   response.status(201).json({ id, status: 'pending' })
@@ -1100,13 +1144,12 @@ async function requireSelfieDisplay(request, response, next) {
     return response.status(403).json({ error: 'This live-screen link is invalid. Copy a new OBS URL from the host screen.' })
   }
   const session = await database.prepare(`
-    SELECT id, paused, expires_at AS expiresAt, closed_at AS closedAt
-    FROM selfie_sessions WHERE id = ? AND display_token_hash = ?
-  `).get(request.params.sessionId, hashSessionToken(token))
-  if (!session) return response.status(404).json({ error: 'This live-screen link is invalid or the selfie session has ended.' })
-  if (session.closedAt || Date.parse(session.expiresAt) <= Date.now()) {
-    return response.status(410).json({ error: 'This selfie session has ended.', closed: true })
-  }
+    SELECT id, owner_user_id AS ownerUserId, paused, closed_at AS closedAt
+    FROM selfie_sessions WHERE id = ? AND (display_token_hash = ? OR id IN (
+      SELECT session_id FROM selfie_session_links WHERE display_token_hash = ?
+    ))
+  `).get(request.params.sessionId, hashSessionToken(token), hashSessionToken(token))
+  if (!session) return response.status(404).json({ error: 'This live-screen link is invalid.' })
   request.selfieDisplaySession = session
   next()
 }
@@ -1117,7 +1160,7 @@ app.get('/api/selfie/display/:sessionId/submissions', requireSelfieDisplay, asyn
     SELECT id, status, created_at AS createdAt, approved_at AS approvedAt
     FROM selfie_submissions WHERE session_id = ? AND status = 'approved' ORDER BY created_at DESC
   `).all(session.id)
-  response.json({ submissions, paused: Boolean(session.paused), expiresAt: session.expiresAt, closed: false })
+  response.json({ submissions, paused: Boolean(session.paused), closed: Boolean(session.closedAt), qrSession: await getSelfieDisplayQr(session) })
 })
 
 app.get('/api/selfie/display/:sessionId/submissions/:submissionId/image', requireSelfieDisplay, async (request, response) => {
@@ -1130,20 +1173,18 @@ app.get('/api/selfie/display/:sessionId/submissions/:submissionId/image', requir
 })
 
 app.get('/api/selfie/sessions/:id/submissions', requireUser, async (request, response) => {
-  const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
+  const session = await getSelfieSessionForOwner(request.params.id, request.user)
   if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
   const submissions = await database.prepare(`
     SELECT id, file_name AS fileName, status, created_at AS createdAt, approved_at AS approvedAt
     FROM selfie_submissions WHERE session_id = ? ORDER BY created_at DESC
   `).all(session.id)
-  response.json({ submissions, paused: Boolean(session.paused), expiresAt: session.expiresAt, closed: Boolean(session.closedAt) || Date.parse(session.expiresAt) <= Date.now() })
+  response.set('Cache-Control', 'no-store').json({ submissions, paused: Boolean(session.paused), closed: Boolean(session.closedAt), closedAt: session.closedAt, qrSession: await getSelfieDisplayQr(session) })
 })
 
 app.post('/api/selfie/sessions/:sessionId/submissions/:submissionId/approve', requireUser, async (request, response) => {
-  const session = await getSelfieSessionForOwner(request.params.sessionId, request.user.id)
-  if (!session || session.closedAt || Date.parse(session.expiresAt) <= Date.now()) {
-    return response.status(404).json({ error: 'This selfie session is closed or has expired.' })
-  }
+  const session = await getSelfieSessionForOwner(request.params.sessionId, request.user)
+  if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
   const result = await database.prepare(`
     UPDATE selfie_submissions SET status = 'approved', approved_at = ?
     WHERE id = ? AND session_id = ? AND status = 'pending'
@@ -1153,7 +1194,7 @@ app.post('/api/selfie/sessions/:sessionId/submissions/:submissionId/approve', re
 })
 
 app.delete('/api/selfie/sessions/:sessionId/submissions/:submissionId', requireUser, async (request, response) => {
-  const session = await getSelfieSessionForOwner(request.params.sessionId, request.user.id)
+  const session = await getSelfieSessionForOwner(request.params.sessionId, request.user)
   if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
   const result = await database.prepare('DELETE FROM selfie_submissions WHERE id = ? AND session_id = ?')
     .run(request.params.submissionId, session.id)
@@ -1166,16 +1207,29 @@ app.get('/api/selfie/sessions/:sessionId/submissions/:submissionId/image', requi
     SELECT sub.image, sub.image_mime_type AS mimeType
     FROM selfie_submissions sub
     JOIN selfie_sessions sess ON sess.id = sub.session_id
-    WHERE sub.id = ? AND sub.session_id = ? AND sess.owner_user_id = ?
-  `).get(request.params.submissionId, request.params.sessionId, request.user.id)
+    WHERE sub.id = ? AND sub.session_id = ? AND (sess.owner_user_id = ? OR ? = 'admin')
+  `).get(request.params.submissionId, request.params.sessionId, request.user.id, request.user.role)
   if (!image) return response.status(404).end()
   response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(image.image))
 })
 
 app.post('/api/selfie/sessions/:id/close', requireUser, async (request, response) => {
-  const session = await getSelfieSessionForOwner(request.params.id, request.user.id)
+  const session = await getSelfieSessionForOwner(request.params.id, request.user)
   if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
-  await database.prepare('DELETE FROM selfie_sessions WHERE id = ?').run(session.id)
+  await inTransaction(() => database.prepare('UPDATE selfie_sessions SET closed_at = ?, paused = 0 WHERE id = ? AND closed_at IS NULL').run(new Date().toISOString(), session.id))
+  response.status(204).end()
+})
+
+app.delete('/api/selfie/sessions/:id', requireUser, async (request, response) => {
+  const result = await inTransaction(async () => {
+    const session = await getSelfieSessionForOwner(request.params.id, request.user)
+    if (!session) return 'missing'
+    if (!session.closedAt) return 'ongoing'
+    await database.prepare('DELETE FROM selfie_sessions WHERE id = ? AND closed_at IS NOT NULL').run(session.id)
+    return 'deleted'
+  })
+  if (result === 'missing') return response.status(404).json({ error: 'This selfie session could not be found.' })
+  if (result === 'ongoing') return response.status(409).json({ error: 'End this selfie session before deleting it.' })
   response.status(204).end()
 })
 

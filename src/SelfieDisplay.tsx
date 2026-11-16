@@ -5,28 +5,35 @@ import { getSelfieJoinUrl } from './SelfieCam'
 import { initialCarouselState, selfieCarousel } from './selfieCarousel'
 
 type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string; approvedAt?: string | null }
+type QrSession = { id: string; joinToken: string; paused: boolean }
 
 export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' }: { sessionId: string; joinToken: string; displayToken?: string }) {
   const qrRef = useRef<HTMLCanvasElement>(null)
-  const [joinUrl, setJoinUrl] = useState('')
+  const [preparedQr, setPreparedQr] = useState({ token: '', url: '' })
   const [carousel, dispatch] = useReducer(selfieCarousel, initialCarouselState)
   const [closed, setClosed] = useState(false)
+  const [ongoingQr, setOngoingQr] = useState<QrSession | null>(null)
   const [error, setError] = useState('')
+  const [qrError, setQrError] = useState('')
+  const qrToken = closed ? ongoingQr?.joinToken || '' : joinToken
+  const qrSessionId = closed ? ongoingQr?.id || '' : sessionId
+  const joinUrl = preparedQr.token === qrToken ? preparedQr.url : ''
 
   useEffect(() => {
     let active = true
-    if (!joinToken) return
-    getSelfieJoinUrl(joinToken).then((url) => { if (active) setJoinUrl(url) }).catch((caught: unknown) => {
-      if (active) setError(caught instanceof Error ? caught.message : 'Could not prepare the QR code.')
+    setQrError('')
+    if (!qrToken) return
+    getSelfieJoinUrl(qrToken).then((url) => { if (active) setPreparedQr({ token: qrToken, url }) }).catch((caught: unknown) => {
+      if (active) setQrError(caught instanceof Error ? caught.message : 'Could not prepare the QR code.')
     })
     return () => { active = false }
-  }, [joinToken])
+  }, [qrToken])
 
   useEffect(() => {
     const canvas = qrRef.current
     if (!canvas || !joinUrl) return
     let active = true
-    const logoUrl = localStorage.getItem(`selfie-qr-logo:${sessionId}`)
+    const logoUrl = localStorage.getItem(`selfie-qr-logo:${qrSessionId}`)
     void QRCode.toCanvas(canvas, joinUrl, { width: 480, margin: 2, errorCorrectionLevel: 'H', color: { dark: '#15151a', light: '#ffffff' } }).then(() => {
       if (!active || !logoUrl) return
       const logo = new Image()
@@ -45,9 +52,11 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
         context.drawImage(logo, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height)
       }
       logo.src = logoUrl
+    }).catch((caught: unknown) => {
+      if (active) setQrError(caught instanceof Error ? caught.message : 'Could not generate the QR code.')
     })
     return () => { active = false }
-  }, [joinUrl, sessionId])
+  }, [joinUrl, qrSessionId])
 
   useEffect(() => {
     let active = true
@@ -60,17 +69,19 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
           cache: 'no-store',
           headers: displayToken ? { 'X-Selfie-Display-Token': displayToken } : undefined,
         })
-        const result = await response.json() as { submissions?: Submission[]; closed?: boolean; paused?: boolean; error?: string }
+        const result = await response.json() as { submissions?: Submission[]; closed?: boolean; paused?: boolean; qrSession?: QrSession | null; error?: string }
         if (!active) return
         if (response.status === 404 || response.status === 410) {
           dispatch({ type: 'reset' })
           setClosed(true)
+          setOngoingQr(null)
           setError(result.error || 'This selfie session has ended.')
           return
         }
         if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load photos.')
         dispatch({ type: 'refresh', photos: result.submissions.filter((submission) => submission.status === 'approved'), paused: Boolean(result.paused) })
         setClosed(Boolean(result.closed))
+        setOngoingQr(result.qrSession || null)
         setError('')
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : 'Could not load photos.')
@@ -135,7 +146,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
   }, [currentId, carousel.photos.length, carousel.pendingIds.length, carousel.paused])
 
   return (
-    <main className="selfie-display">
+    <main className={`selfie-display${!qrToken ? ' selfie-display-archive' : ''}`}>
       <section className="selfie-display-wall" aria-label="Live guest photos">
         {!layers.length ? (
           <p className="selfie-display-empty">{error || (closed ? 'This selfie session has ended.' : 'Photos will appear here as guests send them.')}</p>
@@ -147,10 +158,12 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
           ))
         )}
       </section>
-      <aside className="selfie-display-qr">
-        <div className="selfie-qr-frame"><canvas ref={qrRef} aria-label="Scan to share your selfie" /></div>
+      {qrToken && <aside className="selfie-display-qr">
+        <div className="selfie-qr-frame">{joinUrl ? <canvas key={qrToken} ref={qrRef} aria-label="Scan to share your selfie" /> : <span role="status">{qrError || 'Preparing QR...'}</span>}</div>
         <p><Smartphone aria-hidden="true" />SCAN TO SHARE YOUR SELFIE</p>
-      </aside>
+        {closed && ongoingQr?.paused && <span>Current session uploads are paused</span>}
+        {qrError && <span role="alert">{qrError}</span>}
+      </aside>}
     </main>
   )
 }

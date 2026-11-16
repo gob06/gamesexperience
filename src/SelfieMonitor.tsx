@@ -3,7 +3,7 @@ import { ArrowLeft, LogOut } from 'lucide-react'
 import { ThemeBrand } from './theme'
 
 type Photo = { id: string; status: 'pending' | 'approved'; createdAt: string }
-type Session = { id: string; host: string; createdAt: string; expiresAt: string; paused: boolean; santaEnabled: boolean; photos: Photo[] }
+type Session = { id: string; host: string; createdAt: string; closedAt: string | null; paused: boolean; santaEnabled: boolean; photos: Photo[] }
 
 export default function SelfieMonitor({ username, onLogout }: { username: string; onLogout: () => void }) {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -19,13 +19,13 @@ export default function SelfieMonitor({ username, onLogout }: { username: string
       try {
         const response = await fetch('/api/admin/selfie/sessions', { cache: 'no-store' })
         const result = await response.json() as { sessions?: Session[]; error?: string }
-        if (!response.ok || !result.sessions) throw new Error(result.error || 'Could not load active selfie sessions.')
+        if (!response.ok || !result.sessions) throw new Error(result.error || 'Could not load selfie sessions.')
         if (active) {
           setSessions(result.sessions)
           setError('')
         }
       } catch (caught) {
-        if (active) setError(caught instanceof Error ? caught.message : 'Could not load active selfie sessions.')
+        if (active) setError(caught instanceof Error ? caught.message : 'Could not load selfie sessions.')
       } finally {
         if (active) {
           setLoading(false)
@@ -53,25 +53,26 @@ export default function SelfieMonitor({ username, onLogout }: { username: string
         <header className="activity-heading">
           <span className="activity-eyebrow">READ-ONLY MONITOR</span>
           <h1>Selfie Cam sessions</h1>
-          <p>View current sessions and guest photos. Only the session host can approve, delete, or manage submissions.</p>
+          <p>View current and saved sessions and guest photos. Open Selfie Cam to manage uploads, review photos, or copy an OBS display link.</p>
+          <a className="button button-secondary" href="/selfie">Manage Selfie Cam sessions</a>
         </header>
         {error && <p className="selfie-error" role="alert">{error}</p>}
         {loading ? <p role="status">Loading sessions...</p> : !sessions.length ? (
-          <p>No active Selfie Cam sessions.</p>
+          <p>No Selfie Cam sessions yet.</p>
         ) : (
           <div className="selfie-monitor-layout">
-            <nav className="selfie-monitor-sessions" aria-label="Active selfie sessions">
+            <nav className="selfie-monitor-sessions" aria-label="Selfie sessions">
               {sessions.map((session) => (
                 <button className="button button-secondary" type="button" key={session.id} aria-pressed={selected?.id === session.id} onClick={() => { setSelectedId(session.id); setImageError('') }}>
                   <strong>{session.host} - {session.santaEnabled ? 'Santa selfie' : 'Selfie Cam'}</strong>
                   <span>Started {new Date(session.createdAt).toLocaleString()}</span>
-                  <span>{session.photos.length} photos | {session.paused ? 'Paused' : 'Uploads open'}</span>
+                  <span>{session.photos.length} photos | {session.closedAt ? 'Ended' : session.paused ? 'Paused' : 'Uploads open'}</span>
                 </button>
               ))}
             </nav>
             {selected && <section aria-label="Session photos">
               <h2>{selected.host}'s session</h2>
-              <p>Expires {new Date(selected.expiresAt).toLocaleString()} | {selected.photos.filter((photo) => photo.status === 'pending').length} pending | {selected.photos.filter((photo) => photo.status === 'approved').length} approved</p>
+              <p>{selected.closedAt ? `Ended ${new Date(selected.closedAt).toLocaleString()}` : 'Open until ended by the host or an admin'} | {selected.photos.filter((photo) => photo.status === 'pending').length} pending | {selected.photos.filter((photo) => photo.status === 'approved').length} approved</p>
               {imageError && <p className="selfie-error" role="alert">{imageError}</p>}
               {!selected.photos.length ? <p>No photos uploaded yet.</p> : <div className="selfie-monitor-photos">
                 {selected.photos.map((photo) => (

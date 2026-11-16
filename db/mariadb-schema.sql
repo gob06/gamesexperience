@@ -234,8 +234,18 @@ CREATE TABLE IF NOT EXISTS terms_of_service (
 ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS paused TINYINT(1) NOT NULL DEFAULT 0;
 ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS santa_enabled TINYINT(1) NOT NULL DEFAULT 0;
 ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS display_token_hash VARCHAR(64) NULL;
+ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS live_join_token_hash VARCHAR(64) NULL;
 ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS banner_mime_type VARCHAR(100) NULL;
 ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS banner LONGBLOB NULL;
+
+CREATE TABLE IF NOT EXISTS selfie_session_links (
+  session_id VARCHAR(64) NOT NULL,
+  join_token_hash VARCHAR(64) NOT NULL PRIMARY KEY,
+  display_token_hash VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  UNIQUE KEY selfie_session_links_display (display_token_hash),
+  FOREIGN KEY (session_id) REFERENCES selfie_sessions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS logo_bank (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
