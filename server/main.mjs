@@ -1123,8 +1123,6 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request,
     `).get(session.id)
     if (!currentSession || currentSession.closedAt) return 'closed'
     if (currentSession.paused) return 'paused'
-    const submissionCount = (await database.prepare('SELECT count(*) AS count FROM selfie_submissions WHERE session_id = ?').get(session.id)).count
-    if (submissionCount >= 100) return 'limit'
     await database.prepare(`
       INSERT INTO selfie_submissions (id, session_id, image_mime_type, image, file_name, status, created_at)
       VALUES (?, ?, ?, ?, ?, 'pending', ?)
@@ -1133,7 +1131,6 @@ app.post('/api/selfie/join/:token', imageUpload.single('image'), async (request,
   })
   if (submitted === 'closed') return response.status(404).json({ error: 'This selfie session has ended.' })
   if (submitted === 'paused') return response.status(423).json({ error: 'The host has paused photo uploads. Please try again shortly.' })
-  if (submitted === 'limit') return response.status(429).json({ error: 'This selfie session has reached its submission limit.' })
   response.status(201).json({ id, status: 'pending' })
 })
 

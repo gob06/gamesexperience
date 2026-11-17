@@ -297,4 +297,25 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal((await fetch(`${historyUrl}/${hostSession.id}`, { method: 'DELETE', headers: hostHeaders })).status, 204)
   assert.equal(database.prepare('SELECT count(*) AS count FROM selfie_submissions WHERE session_id = ?').get(hostSession.id).count, 0)
   assert.equal((await fetch(`${base}/api/selfie/join/${replacement.joinToken}/status`)).status, 200)
+  for (let index = 0; index < 100; index++) {
+    insert.run(`bulk-photo-${index}`, replacement.id, 'image/png', png, 'photo.png', 'pending', new Date().toISOString())
+  }
+  for (const expectedCount of [101, 102]) {
+    const uploaded = await upload(replacement.joinToken)
+    assert.equal(uploaded.status, 201, 'uploads must succeed beyond the former 100-photo cap')
+    assert.equal((await uploaded.json()).status, 'pending')
+    assert.equal(database.prepare('SELECT count(*) AS count FROM selfie_submissions WHERE session_id = ?').get(replacement.id).count, expectedCount)
+  }
+  const unlimitedList = await (await fetch(`${historyUrl}/${replacement.id}/submissions`, { headers: adminHeaders })).json()
+  assert.equal(unlimitedList.submissions.length, 102)
+  const unlimitedDisplay = await (await fetch(`${base}/api/selfie/display/${replacement.id}/submissions`, {
+    headers: { 'X-Selfie-Display-Token': replacement.displayToken },
+  })).json()
+  assert.deepEqual(unlimitedDisplay.submissions, [], 'uploads beyond the old cap must still require approval')
+  await fetch(`${historyUrl}/${replacement.id}/pause`, {
+    method: 'POST', headers: { ...adminHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: true }),
+  })
+  assert.equal((await upload(replacement.joinToken)).status, 423)
+  assert.equal((await fetch(`${historyUrl}/${replacement.id}/close`, { method: 'POST', headers: adminHeaders })).status, 204)
+  assert.equal((await upload(replacement.joinToken)).status, 404)
 })
