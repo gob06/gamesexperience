@@ -457,6 +457,7 @@ export default function SelfieCam() {
                       <div className="selfie-submission-copy"><strong>{submission.status === 'approved' ? 'Approved photo' : 'Needs review'}</strong><span>{new Date(submission.createdAt).toLocaleTimeString()}</span></div>
                       {submission.status === 'pending' ? (
                         <div className="selfie-submission-actions">
+                          <button className="button button-secondary" type="button" onClick={() => void showFullscreen(submission)}><Maximize size={15} /> Preview full screen</button>
                           <button className="button button-primary" type="button" onClick={() => void updateSubmission(submission, 'approve')} aria-label="Approve photo"><Check size={16} /> Approve</button>
                           <button className="icon-button selfie-reject-button" type="button" onClick={() => void updateSubmission(submission, 'reject')} aria-label="Reject and delete photo"><Trash2 size={16} /></button>
                         </div>
@@ -477,8 +478,8 @@ export default function SelfieCam() {
         </section>
       </div>
 
-      <section ref={displayRef} className={`selfie-fullscreen ${fallbackFullscreen ? 'is-fallback-fullscreen' : ''}`} aria-label="Approved guest photo">
-        {session && displaySubmission && <img src={`/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(displaySubmission.id)}/image`} alt="Host-approved guest photo" />}
+      <section ref={displayRef} className={`selfie-fullscreen ${fallbackFullscreen ? 'is-fallback-fullscreen' : ''}`} aria-label="Guest photo preview">
+        {session && displaySubmission && <img src={`/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(displaySubmission.id)}/image`} alt={displaySubmission.status === 'approved' ? 'Host-approved guest photo' : 'Guest photo awaiting approval'} />}
         <button className="selfie-exit-button" type="button" onClick={() => void exitFullscreen()} aria-label="Exit fullscreen"><Minimize size={20} /><span>Exit full screen</span></button>
       </section>
     </main>

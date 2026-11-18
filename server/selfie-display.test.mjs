@@ -146,6 +146,11 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal(photo.status, 200)
   assert.deepEqual(Buffer.from(await photo.arrayBuffer()), image)
   assert.equal((await fetch(photoUrl('pending-photo'))).status, 404)
+  const pendingPreview = `${base}/api/selfie/sessions/${session.id}/submissions/pending-photo/image`
+  assert.equal((await fetch(pendingPreview)).status, 401)
+  assert.equal((await fetch(pendingPreview, { headers: { Cookie: cookie } })).status, 200)
+  assert.equal(database.prepare('SELECT status FROM selfie_submissions WHERE id = ?').get('pending-photo').status, 'pending')
+  assert.equal((await fetch(photoUrl('pending-photo'))).status, 404, 'private preview must not publish the pending photo')
   assert.equal((await fetch(photoUrl('other-photo'))).status, 404)
   assert.equal((await fetch(displayBase)).status, 403)
   assert.equal((await fetch(displayBase, { headers: { 'X-Selfie-Display-Token': session.joinToken } })).status, 404)
