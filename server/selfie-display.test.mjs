@@ -139,6 +139,7 @@ test('selfie sessions end manually and retain private history and approved OBS p
   const result = await list.json()
   assert.deepEqual(result.submissions.map((photo) => photo.id), ['approved-photo'])
   assert.equal(result.paused, false)
+  assert.equal(result.rotationSeconds, 5)
   assert.equal(result.closed, false)
   assert.equal(result.qrSession, null)
   const photoUrl = (id, token = session.displayToken) => `${displayBase}/${id}/image?token=${token}`
@@ -159,6 +160,19 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal((await fetch(`${base}/api/selfie/sessions/${session.id}/submissions/pending-photo/approve`, { method: 'POST', headers })).status, 401)
   const ownerList = await fetch(`${base}/api/selfie/sessions/${session.id}/submissions`, { headers: { Cookie: cookie } })
   assert.equal((await ownerList.json()).submissions.length, 2)
+  const rotationUrl = `${base}/api/selfie/sessions/${session.id}/rotation`
+  const rotation = (seconds, auth = adminHeaders) => fetch(rotationUrl, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ seconds }),
+  })
+  for (const invalid of [0, 1, 301, 2.5, '2', null]) assert.equal((await rotation(invalid)).status, 400)
+  assert.equal((await rotation(12, hostHeaders)).status, 404)
+  assert.equal((await rotation(12, {})).status, 401)
+  assert.equal((await rotation(2)).status, 200)
+  assert.equal((await (await fetch(displayBase, { headers })).json()).rotationSeconds, 2)
+  assert.equal((await rotation(300)).status, 200)
+  assert.equal((await rotation(12)).status, 200)
+  assert.equal((await (await fetch(displayBase, { headers })).json()).rotationSeconds, 12)
+  assert.equal((await (await fetch(`${base}/api/selfie/sessions/${session.id}/submissions`, { headers: adminHeaders })).json()).rotationSeconds, 12)
   await fetch(`${base}/api/selfie/sessions/${session.id}/pause`, {
     method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: true }),
   })
@@ -269,6 +283,7 @@ test('selfie sessions end manually and retain private history and approved OBS p
   server.stderr.on('data', (chunk) => { logs += chunk })
   await waitForServer()
   const restartedQr = (await (await fetch(displayBase, { headers })).json()).qrSession
+  assert.equal((await (await fetch(displayBase, { headers })).json()).rotationSeconds, 12)
   assert.equal(restartedQr.joinToken, endedBody.qrSession.joinToken)
   assert.equal((await fetch(`${base}/api/selfie/join/${restartedQr.joinToken}/status`)).status, 200)
   assert.ok(database.prepare('SELECT live_join_token_hash FROM selfie_sessions WHERE id = ?').get(newestSession.id).live_join_token_hash)
@@ -317,10 +332,52 @@ test('selfie sessions end manually and retain private history and approved OBS p
     headers: { 'X-Selfie-Display-Token': replacement.displayToken },
   })).json()
   assert.deepEqual(unlimitedDisplay.submissions, [], 'uploads beyond the old cap must still require approval')
+  insert.run('batch-approved-a', replacement.id, 'image/png', png, 'photo.png', 'approved', new Date().toISOString())
+  insert.run('batch-approved-b', replacement.id, 'image/png', png, 'photo.png', 'approved', new Date().toISOString())
+  insert.run('batch-other', otherSession.id, 'image/png', png, 'photo.png', 'approved', new Date().toISOString())
+  const batchUrl = `${historyUrl}/${replacement.id}/submissions/delete-approved`
+  const batch = (ids, auth = adminHeaders) => fetch(batchUrl, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+  })
+  assert.equal((await batch([])).status, 400)
+  assert.equal((await batch([null])).status, 400)
+  assert.equal((await batch(['batch-approved-a'], hostHeaders)).status, 404)
+  assert.equal((await batch(['batch-approved-a'], {})).status, 401)
+  const deleted = await batch(['batch-approved-a', 'batch-approved-b', 'batch-approved-a', 'bulk-photo-0', 'batch-other', 'missing'])
+  assert.equal(deleted.status, 200)
+  assert.equal((await deleted.json()).deleted, 2)
+  assert.ok(database.prepare('SELECT id FROM selfie_submissions WHERE id = ?').get('bulk-photo-0'))
+  assert.ok(database.prepare('SELECT id FROM selfie_submissions WHERE id = ?').get('batch-other'))
+  assert.equal((await fetch(`${base}/api/selfie/display/${replacement.id}/submissions/batch-approved-a/image?token=${replacement.displayToken}`)).status, 404)
   await fetch(`${historyUrl}/${replacement.id}/pause`, {
     method: 'POST', headers: { ...adminHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: true }),
   })
   assert.equal((await upload(replacement.joinToken)).status, 423)
   assert.equal((await fetch(`${historyUrl}/${replacement.id}/close`, { method: 'POST', headers: adminHeaders })).status, 204)
   assert.equal((await upload(replacement.joinToken)).status, 404)
+
+  const imageSession = await createSession()
+  const jpegWithExif = Buffer.from('/9j/4QAiRXhpZgAASUkqAAgAAAABABIBAwABAAAABgAAAAAAAAD/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAACAAMDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAbEAEAAAcAAAAAAAAAAAAAAAAAAQMFBjV0sv/EABUBAQEAAAAAAAAAAAAAAAAAAAUJ/8QAGxEAAAcBAAAAAAAAAAAAAAAAAAEDBAY1c7L/2gAMAwEAAhEDEQA/AIHuHP1LcndxAU2jFGyyT4IASK4d6qdmP//Z', 'base64')
+  const webp = Buffer.from('UklGRlgAAABXRUJQVlA4IEwAAACwAgCdASoDAAIAAUAmJagCdHIAqgDJAP0ABbtZeYgA/v26Vo/hPk1z9/+NW8etnfj//9Lg//41bx62d+P/6XA0YVQnfkw6jChOmcAA', 'base64')
+  for (const [mime, bytes] of [['image/jpeg', jpegWithExif], ['image/png', png], ['image/webp', webp]]) {
+    const form = new FormData()
+    form.append('image', new Blob([bytes], { type: mime }), 'orientation-test')
+    const uploaded = await fetch(`${base}/api/selfie/join/${imageSession.joinToken}`, { method: 'POST', body: form })
+    assert.equal(uploaded.status, 201, mime)
+    const { id } = await uploaded.json()
+    const hostImage = `${historyUrl}/${imageSession.id}/submissions/${id}/image`
+    const monitorImage = `${monitorUrl}/${imageSession.id}/photos/${id}/image`
+    for (const url of [hostImage, monitorImage]) {
+      const response = await fetch(url, { headers: adminHeaders })
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('content-type'), mime)
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes)
+    }
+    assert.equal((await fetch(`${historyUrl}/${imageSession.id}/submissions/${id}/approve`, { method: 'POST', headers: adminHeaders })).status, 204)
+    const displayImage = `${base}/api/selfie/display/${imageSession.id}/submissions/${id}/image?token=${imageSession.displayToken}`
+    const response = await fetch(displayImage)
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('content-type'), mime)
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes)
+  }
 })

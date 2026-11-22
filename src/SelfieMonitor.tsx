@@ -77,7 +77,7 @@ export default function SelfieMonitor({ username, onLogout }: { username: string
               {!selected.photos.length ? <p>No photos uploaded yet.</p> : <div className="selfie-monitor-photos">
                 {selected.photos.map((photo) => (
                   <figure key={photo.id}>
-                    <img src={`/api/admin/selfie/sessions/${encodeURIComponent(selected.id)}/photos/${encodeURIComponent(photo.id)}/image`} alt={photo.status === 'approved' ? 'Approved guest photo' : 'Guest photo awaiting approval'} loading="lazy" onError={() => setImageError('A photo could not be loaded. The session or photo may have been removed.')} />
+                    <img className="audience-submitted-image" src={`/api/admin/selfie/sessions/${encodeURIComponent(selected.id)}/photos/${encodeURIComponent(photo.id)}/image`} alt={photo.status === 'approved' ? 'Approved guest photo' : 'Guest photo awaiting approval'} loading="lazy" onError={() => setImageError('A photo could not be loaded. The session or photo may have been removed.')} />
                     <figcaption>{photo.status === 'approved' ? 'Approved' : 'Pending approval'} - {new Date(photo.createdAt).toLocaleString()}</figcaption>
                   </figure>
                 ))}

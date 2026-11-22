@@ -12,6 +12,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
   const [preparedQr, setPreparedQr] = useState({ token: '', url: '' })
   const [carousel, dispatch] = useReducer(selfieCarousel, initialCarouselState)
   const [closed, setClosed] = useState(false)
+  const [rotationSeconds, setRotationSeconds] = useState(5)
   const [ongoingQr, setOngoingQr] = useState<QrSession | null>(null)
   const [error, setError] = useState('')
   const [qrError, setQrError] = useState('')
@@ -69,7 +70,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
           cache: 'no-store',
           headers: displayToken ? { 'X-Selfie-Display-Token': displayToken } : undefined,
         })
-        const result = await response.json() as { submissions?: Submission[]; closed?: boolean; paused?: boolean; qrSession?: QrSession | null; error?: string }
+        const result = await response.json() as { submissions?: Submission[]; closed?: boolean; paused?: boolean; rotationSeconds?: number; qrSession?: QrSession | null; error?: string }
         if (!active) return
         if (response.status === 404 || response.status === 410) {
           dispatch({ type: 'reset' })
@@ -80,6 +81,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
         }
         if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load photos.')
         dispatch({ type: 'refresh', photos: result.submissions.filter((submission) => submission.status === 'approved'), paused: Boolean(result.paused) })
+        if (typeof result.rotationSeconds === 'number') setRotationSeconds(result.rotationSeconds)
         setClosed(Boolean(result.closed))
         setOngoingQr(result.qrSession || null)
         setError('')
@@ -121,6 +123,11 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
   const currentId = carousel.currentId
   const [layers, setLayers] = useState<string[]>([])
 
+  useEffect(() => {
+    const ids = new Set(carousel.photos.map((photo) => photo.id))
+    setLayers((value) => value.filter((id) => ids.has(id)))
+  }, [carousel.photos])
+
   // Preload the next photo, then fade it in over the previous one so the wall never goes blank.
   useEffect(() => {
     if (!currentId) { setLayers([]); return }
@@ -134,16 +141,16 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
     preload.onerror = show
     preload.src = imageUrl(currentId)
     // Never stay blank if the image is slow to load.
-    const fallback = window.setTimeout(show, 3000)
+    const fallback = window.setTimeout(show, 1000)
     const trim = window.setTimeout(() => { if (active) setLayers((value) => value.slice(-1)) }, 4600)
     return () => { active = false; window.clearTimeout(trim); window.clearTimeout(fallback) }
   }, [currentId, sessionId, displayToken])
 
   useEffect(() => {
     if (carousel.paused || (carousel.photos.length < 2 && !carousel.pendingIds.length)) return
-    const timer = window.setTimeout(() => dispatch({ type: 'advance' }), 5000)
+    const timer = window.setTimeout(() => dispatch({ type: 'advance' }), rotationSeconds * 1000)
     return () => window.clearTimeout(timer)
-  }, [currentId, carousel.photos.length, carousel.pendingIds.length, carousel.paused])
+  }, [currentId, carousel.photos.length, carousel.pendingIds.length, carousel.paused, rotationSeconds])
 
   return (
     <main className={`selfie-display${!qrToken ? ' selfie-display-archive' : ''}`}>
@@ -153,7 +160,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
         ) : (
           layers.map((id) => (
             <div className="selfie-slide" key={id}>
-              <img className="selfie-slide-photo" src={imageUrl(id)} alt="Guest photo" />
+              <img className="selfie-slide-photo audience-submitted-image" src={imageUrl(id)} alt="Guest photo" />
             </div>
           ))
         )}

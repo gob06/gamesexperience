@@ -18,7 +18,7 @@ const SantaOverlay = lazy(() => import('./SantaOverlay').catch((error: unknown) 
   return { default: SantaLoadError }
 }))
 
-type SelfieSession = { id: string; joinToken: string; displayToken: string; createdAt: string; closedAt: string | null; paused: boolean }
+type SelfieSession = { id: string; joinToken: string; displayToken: string; createdAt: string; closedAt: string | null; paused: boolean; rotationSeconds: number }
 type RecentSession = { id: string; host: string; createdAt: string; closedAt: string | null; paused: boolean; photoCount: number; approvedCount: number; santaEnabled: boolean }
 type SelfieSubmission = { id: string; fileName: string; status: 'pending' | 'approved'; createdAt: string }
 
@@ -55,6 +55,10 @@ export default function SelfieCam() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [paused, setPaused] = useState(false)
+  const [rotationInput, setRotationInput] = useState('5')
+  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([])
+  const [savingRotation, setSavingRotation] = useState(false)
+  const [deletingPhotos, setDeletingPhotos] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -86,6 +90,8 @@ export default function SelfieCam() {
       const url = await getSelfieJoinUrl(result.joinToken)
       selectedSessionId.current = result.id
       setSession(result)
+      setRotationInput(String(result.rotationSeconds))
+      setSelectedPhotos([])
       setJoinUrl(url)
       setPaused(result.paused)
       setSubmissions([])
@@ -195,6 +201,8 @@ export default function SelfieCam() {
       }
       selectedSessionId.current = result.id
       setSession(result)
+      setRotationInput(String(result.rotationSeconds))
+      setSelectedPhotos([])
       setPaused(false)
       setJoinUrl(url)
       setSubmissions([])
@@ -209,12 +217,14 @@ export default function SelfieCam() {
   async function refreshSubmissions(sessionId: string) {
     try {
       const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions`)
-      const result = await response.json() as { submissions?: SelfieSubmission[]; closed?: boolean; closedAt?: string | null; paused?: boolean; error?: string }
+      const result = await response.json() as { submissions?: SelfieSubmission[]; closed?: boolean; closedAt?: string | null; paused?: boolean; rotationSeconds?: number; error?: string }
       if (selectedSessionId.current !== sessionId) return
       if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load selfie submissions.')
       setSubmissions(result.submissions)
+      const approvedIds = new Set(result.submissions.filter((submission) => submission.status === 'approved').map((submission) => submission.id))
+      setSelectedPhotos((current) => current.filter((id) => approvedIds.has(id)))
       setPaused(Boolean(result.paused))
-      setSession((current) => current?.id === sessionId ? { ...current, closedAt: result.closedAt || null } : current)
+      setSession((current) => current?.id === sessionId ? { ...current, closedAt: result.closedAt || null, rotationSeconds: result.rotationSeconds ?? current.rotationSeconds } : current)
     } catch (caught) {
       if (selectedSessionId.current === sessionId) setError(caught instanceof Error ? caught.message : 'Could not refresh selfie submissions.')
     }
@@ -295,6 +305,74 @@ export default function SelfieCam() {
       await refreshSubmissions(session.id)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : `Could not ${action} this photo.`)
+    }
+  }
+
+  async function saveRotation() {
+    if (!session || savingRotation) return
+    const seconds = Number(rotationInput)
+    if (!Number.isInteger(seconds) || seconds < 2 || seconds > 300) {
+      setError('Rotation duration must be a whole number between 2 and 300 seconds.')
+      return
+    }
+    const id = session.id
+    setSavingRotation(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(id)}/rotation`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seconds }),
+      })
+      const result = await response.json() as { rotationSeconds?: number; error?: string }
+      if (!response.ok || typeof result.rotationSeconds !== 'number') throw new Error(result.error || 'Could not save rotation duration.')
+      if (selectedSessionId.current === id) {
+        const rotationSeconds = result.rotationSeconds
+        setSession((current) => current?.id === id ? { ...current, rotationSeconds } : current)
+        setNotice('Rotation duration saved for the live screen and OBS.')
+      }
+    } catch (caught) {
+      if (selectedSessionId.current === id) setError(caught instanceof Error ? caught.message : 'Could not save rotation duration.')
+    } finally {
+      setSavingRotation(false)
+    }
+  }
+
+  async function deleteSelectedPhotos() {
+    if (!session || deletingPhotos || !selectedPhotos.length || !window.confirm(`Permanently delete ${selectedPhotos.length} selected approved photo(s)? This cannot be undone.`)) return
+    const id = session.id
+    const ids = selectedPhotos
+    setDeletingPhotos(true)
+    setError('')
+    setNotice('')
+    let deleted = 0
+    let processed = 0
+    try {
+      for (let offset = 0; offset < ids.length; offset += 250) {
+        const batch = ids.slice(offset, offset + 250)
+        const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(id)}/submissions/delete-approved`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+        })
+        const result = await response.json() as { deleted?: number; error?: string }
+        if (!response.ok || typeof result.deleted !== 'number') throw new Error(result.error || 'Could not delete selected photos.')
+        deleted += result.deleted
+        processed += batch.length
+      }
+      if (selectedSessionId.current === id) {
+        setSelectedPhotos([])
+        setDisplaySubmission((current) => current && ids.includes(current.id) ? null : current)
+        setNotice(`Deleted ${deleted} approved photo(s). Photos already removed were skipped.`)
+        await refreshSubmissions(id)
+      }
+    } catch (caught) {
+      if (selectedSessionId.current === id) {
+        setSelectedPhotos((current) => current.filter((photoId) => !ids.slice(0, processed).includes(photoId)))
+        setDisplaySubmission((current) => current && ids.slice(0, processed).includes(current.id) ? null : current)
+        await refreshSubmissions(id)
+        const message = caught instanceof Error ? caught.message : 'Could not delete selected photos.'
+        setError(`${message} ${deleted} photo(s) were deleted before the error. Refresh and retry the remaining selection.`)
+      }
+    } finally {
+      setDeletingPhotos(false)
     }
   }
 
@@ -392,7 +470,7 @@ export default function SelfieCam() {
             <div><h2>Recent sessions</h2><p>Open a session to review its photos or reuse its OBS display.</p></div>
             <button className="button button-secondary" type="button" disabled={loading} onClick={() => {
               selectedSessionId.current = null
-              setSession(null); setSubmissions([]); setDisplaySubmission(null); setJoinUrl(''); setError(''); setNotice('')
+              setSession(null); setSubmissions([]); setSelectedPhotos([]); setDisplaySubmission(null); setJoinUrl(''); setError(''); setNotice('')
             }}>New session</button>
           </div>
           {sessionsError && <p className="selfie-error" role="alert">{sessionsError}</p>}
@@ -443,17 +521,31 @@ export default function SelfieCam() {
                 </>}
                 <a className="button button-primary" href={liveScreenUrl} target="_blank" rel="noreferrer"><Maximize size={15} /> Open live screen {session.closedAt ? '(saved photos)' : '(QR + photos)'}</a>
                 <button className="button button-secondary" type="button" onClick={() => void copyLiveScreenUrl()}><Copy size={15} /> Copy OBS URL</button>
+                <form className="selfie-rotation" onSubmit={(event) => { event.preventDefault(); void saveRotation() }}>
+                  <label htmlFor="selfie-rotation">Photo rotation (seconds)</label>
+                  <input id="selfie-rotation" type="number" min="2" max="300" step="1" required value={rotationInput} onChange={(event) => setRotationInput(event.currentTarget.value)} />
+                  <button className="button button-secondary" type="submit" disabled={savingRotation}>{savingRotation ? 'Saving...' : 'Save duration'}</button>
+                  <span>Current: {session.rotationSeconds} seconds (2–300)</span>
+                </form>
                 <label htmlFor="selfie-obs-url">OBS Browser Source URL</label>
                 <input id="selfie-obs-url" type="text" readOnly value={liveScreenUrl} onFocus={(event) => event.currentTarget.select()} />
                 <p>In OBS, add a Browser Source, paste this entire URL, and set its size to 1920 × 1080. Opening the live screen only opens a browser tab; it does not add an OBS source. Keep this link private: it grants read-only access to approved photos, including after uploads end. Previously copied OBS URLs continue to work. Ended-session displays show the newest ongoing session from the same host as their upload QR, while continuing to play the ended session's photos.</p>
                 <span className="selfie-expiry">{session.closedAt ? `Uploads ended ${new Date(session.closedAt).toLocaleString()}` : 'No time limit - uploads stay open until you end the session.'}</span>
               </div>
               <div className="selfie-review-heading"><h3>Photo review</h3><span>{pendingSubmissions.length} waiting · {approvedSubmissions.length} approved</span></div>
+              {approvedSubmissions.length > 0 && <div className="selfie-batch-actions">
+                <label><input type="checkbox" disabled={deletingPhotos} checked={approvedSubmissions.every((photo) => selectedPhotos.includes(photo.id))} onChange={(event) => setSelectedPhotos(event.currentTarget.checked ? approvedSubmissions.map((photo) => photo.id) : [])} /> Select all approved</label>
+                <button className="button button-secondary" type="button" disabled={deletingPhotos || !selectedPhotos.length} onClick={() => void deleteSelectedPhotos()}><Trash2 size={15} /> {deletingPhotos ? 'Deleting...' : `Delete selected (${selectedPhotos.length})`}</button>
+              </div>}
               {submissions.length === 0 ? <p className="selfie-empty-submissions">Waiting for guests to submit photos…</p> : (
                 <div className="selfie-submission-list">
                   {submissions.map((submission) => (
                     <article className="selfie-submission" key={submission.id}>
-                      <img src={`/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(submission.id)}/image`} alt={submission.status === 'approved' ? 'Approved guest photo' : 'Photo awaiting review'} />
+                      {submission.status === 'approved' && <input type="checkbox" aria-label={`Select approved photo from ${new Date(submission.createdAt).toLocaleString()}`} disabled={deletingPhotos} checked={selectedPhotos.includes(submission.id)} onChange={(event) => {
+                        const checked = event.currentTarget.checked
+                        setSelectedPhotos((current) => checked ? [...current, submission.id] : current.filter((id) => id !== submission.id))
+                      }} />}
+                      <img className="audience-submitted-image" src={`/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(submission.id)}/image`} alt={submission.status === 'approved' ? 'Approved guest photo' : 'Photo awaiting review'} />
                       <div className="selfie-submission-copy"><strong>{submission.status === 'approved' ? 'Approved photo' : 'Needs review'}</strong><span>{new Date(submission.createdAt).toLocaleTimeString()}</span></div>
                       {submission.status === 'pending' ? (
                         <div className="selfie-submission-actions">
@@ -479,7 +571,7 @@ export default function SelfieCam() {
       </div>
 
       <section ref={displayRef} className={`selfie-fullscreen ${fallbackFullscreen ? 'is-fallback-fullscreen' : ''}`} aria-label="Guest photo preview">
-        {session && displaySubmission && <img src={`/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(displaySubmission.id)}/image`} alt={displaySubmission.status === 'approved' ? 'Host-approved guest photo' : 'Guest photo awaiting approval'} />}
+        {session && displaySubmission && <img className="audience-submitted-image" src={`/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(displaySubmission.id)}/image`} alt={displaySubmission.status === 'approved' ? 'Host-approved guest photo' : 'Guest photo awaiting approval'} />}
         <button className="selfie-exit-button" type="button" onClick={() => void exitFullscreen()} aria-label="Exit fullscreen"><Minimize size={20} /><span>Exit full screen</span></button>
       </section>
     </main>
@@ -610,10 +702,7 @@ export function SelfieParticipant({ token }: { token: string }) {
       setError('Could not capture a photo in this browser.')
       return
     }
-    context.translate(canvas.width, 0)
-    context.scale(-1, 1)
     context.drawImage(video, 0, 0, canvas.width, canvas.height)
-    context.setTransform(1, 0, 0, 1, 0, 0)
     if (withSanta) {
       const santa = santaRef.current
       if (!santaReady || !santa) {
@@ -688,7 +777,7 @@ export function SelfieParticipant({ token }: { token: string }) {
             </div>
           ) : previewUrl ? (
             <>
-              <div className="selfie-photo-preview"><img src={previewUrl} alt="Your photo preview" /></div>
+              <div className="selfie-photo-preview"><img className="audience-submitted-image" src={previewUrl} alt="Your photo preview" /></div>
               <div className="selfie-controls">
                 <button className="button button-secondary" type="button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={16} /> Choose another</button>
                 <button className="button button-primary" type="button" onClick={() => void submitPhoto()} disabled={submitting || submitted || uploadsPaused}><Upload size={16} /> {submitted ? 'Sent for host approval' : uploadsPaused ? 'Uploads paused' : submitting ? 'Sending…' : 'Send to host'}</button>

@@ -46,3 +46,14 @@ test('new arrivals while a priority photo is displayed wait for its turn', () =>
   state = selfieCarousel(state, { type: 'advance' })
   assert.equal(state.currentId, 'c')
 })
+
+test('batch deletion clears removed current and queued photos even while paused', () => {
+  let state = selfieCarousel(initialCarouselState, { type: 'refresh', photos: [a, b], paused: false })
+  state = selfieCarousel(state, { type: 'refresh', photos: [a, b, c], paused: true })
+  state = selfieCarousel(state, { type: 'refresh', photos: [b], paused: true })
+  assert.equal(state.currentId, 'b')
+  assert.deepEqual(state.pendingIds, [])
+  state = selfieCarousel(state, { type: 'refresh', photos: [], paused: true })
+  assert.equal(state.currentId, null)
+  assert.deepEqual(state.pendingIds, [])
+})

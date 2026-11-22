@@ -962,7 +962,7 @@ app.get('/api/admin/theme/audit', requireAdmin, async (_request, response) => {
 
 function getSelfieSessionForOwner(sessionId, user) {
   return database.prepare(`
-    SELECT id, owner_user_id AS ownerUserId, created_at AS createdAt, closed_at AS closedAt, paused, santa_enabled AS santaEnabled
+    SELECT id, owner_user_id AS ownerUserId, created_at AS createdAt, closed_at AS closedAt, paused, rotation_seconds AS rotationSeconds, santa_enabled AS santaEnabled
     FROM selfie_sessions
     WHERE id = ? AND (owner_user_id = ? OR ? = 'admin')
   `).get(sessionId, user.id, user.role)
@@ -996,6 +996,17 @@ app.post('/api/selfie/sessions/:id/pause', requireUser, async (request, response
   response.json({ paused: Boolean(paused) })
 })
 
+app.post('/api/selfie/sessions/:id/rotation', requireUser, async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.id, request.user)
+  if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
+  const seconds = request.body?.seconds
+  if (!Number.isInteger(seconds) || seconds < 2 || seconds > 300) {
+    return response.status(400).json({ error: 'Rotation duration must be a whole number between 2 and 300 seconds.' })
+  }
+  await database.prepare('UPDATE selfie_sessions SET rotation_seconds = ? WHERE id = ?').run(seconds, session.id)
+  response.json({ rotationSeconds: seconds })
+})
+
 app.get('/api/selfie/sessions', requireUser, async (request, response) => {
   const sessions = await database.prepare(`
     SELECT sess.id, u.username AS host, sess.created_at AS createdAt, sess.closed_at AS closedAt,
@@ -1022,7 +1033,7 @@ app.post('/api/selfie/sessions/:id/links', requireUser, async (request, response
   `).run(session.id, hashSessionToken(joinToken), hashSessionToken(displayToken), new Date().toISOString())
   response.set('Cache-Control', 'no-store').json({
     id: session.id, createdAt: session.createdAt, closedAt: session.closedAt,
-    paused: Boolean(session.paused), santaEnabled: Boolean(session.santaEnabled), joinToken, displayToken,
+    paused: Boolean(session.paused), rotationSeconds: session.rotationSeconds, santaEnabled: Boolean(session.santaEnabled), joinToken, displayToken,
   })
 })
 
@@ -1075,7 +1086,7 @@ app.post('/api/selfie/sessions', requireUser, async (request, response) => {
     INSERT INTO selfie_sessions (id, join_token_hash, display_token_hash, owner_user_id, created_at, expires_at, santa_enabled, live_join_token_hash)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(sessionId, hashSessionToken(joinToken), hashSessionToken(displayToken), request.user.id, now.toISOString(), now.toISOString(), Number(santaEnabled), hashSessionToken(selfieLiveJoinToken(hashSessionToken(joinToken))))
-  response.set('Cache-Control', 'no-store').status(201).json({ id: sessionId, joinToken, displayToken, createdAt: now.toISOString(), closedAt: null, paused: false, santaEnabled })
+  response.set('Cache-Control', 'no-store').status(201).json({ id: sessionId, joinToken, displayToken, createdAt: now.toISOString(), closedAt: null, paused: false, rotationSeconds: 5, santaEnabled })
 })
 
 app.post('/api/selfie/sessions/:id/banner', requireUser, imageUpload.single('image'), async (request, response) => {
@@ -1141,7 +1152,7 @@ async function requireSelfieDisplay(request, response, next) {
     return response.status(403).json({ error: 'This live-screen link is invalid. Copy a new OBS URL from the host screen.' })
   }
   const session = await database.prepare(`
-    SELECT id, owner_user_id AS ownerUserId, paused, closed_at AS closedAt
+    SELECT id, owner_user_id AS ownerUserId, paused, closed_at AS closedAt, rotation_seconds AS rotationSeconds
     FROM selfie_sessions WHERE id = ? AND (display_token_hash = ? OR id IN (
       SELECT session_id FROM selfie_session_links WHERE display_token_hash = ?
     ))
@@ -1157,7 +1168,7 @@ app.get('/api/selfie/display/:sessionId/submissions', requireSelfieDisplay, asyn
     SELECT id, status, created_at AS createdAt, approved_at AS approvedAt
     FROM selfie_submissions WHERE session_id = ? AND status = 'approved' ORDER BY created_at DESC
   `).all(session.id)
-  response.json({ submissions, paused: Boolean(session.paused), closed: Boolean(session.closedAt), qrSession: await getSelfieDisplayQr(session) })
+  response.json({ submissions, paused: Boolean(session.paused), rotationSeconds: session.rotationSeconds, closed: Boolean(session.closedAt), qrSession: await getSelfieDisplayQr(session) })
 })
 
 app.get('/api/selfie/display/:sessionId/submissions/:submissionId/image', requireSelfieDisplay, async (request, response) => {
@@ -1176,7 +1187,23 @@ app.get('/api/selfie/sessions/:id/submissions', requireUser, async (request, res
     SELECT id, file_name AS fileName, status, created_at AS createdAt, approved_at AS approvedAt
     FROM selfie_submissions WHERE session_id = ? ORDER BY created_at DESC
   `).all(session.id)
-  response.set('Cache-Control', 'no-store').json({ submissions, paused: Boolean(session.paused), closed: Boolean(session.closedAt), closedAt: session.closedAt, qrSession: await getSelfieDisplayQr(session) })
+  response.set('Cache-Control', 'no-store').json({ submissions, paused: Boolean(session.paused), rotationSeconds: session.rotationSeconds, closed: Boolean(session.closedAt), closedAt: session.closedAt, qrSession: await getSelfieDisplayQr(session) })
+})
+
+app.post('/api/selfie/sessions/:sessionId/submissions/delete-approved', requireUser, async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.sessionId, request.user)
+  if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
+  const ids = request.body?.ids
+  if (!Array.isArray(ids) || !ids.length || ids.some((id) => typeof id !== 'string' || !id || id.length > 64)) {
+    return response.status(400).json({ error: 'Select at least one valid approved photo.' })
+  }
+  const deleted = await inTransaction(async () => {
+    const remove = database.prepare("DELETE FROM selfie_submissions WHERE id = ? AND session_id = ? AND status = 'approved'")
+    let count = 0
+    for (const id of new Set(ids)) count += (await remove.run(id, session.id)).changes
+    return count
+  })
+  response.json({ deleted })
 })
 
 app.post('/api/selfie/sessions/:sessionId/submissions/:submissionId/approve', requireUser, async (request, response) => {
