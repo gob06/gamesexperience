@@ -979,12 +979,11 @@ function getSelfieSessionForJoin(token) {
 }
 
 async function getSelfieDisplayQr(session) {
-  if (!session.closedAt) return null
   const ongoing = await database.prepare(`
     SELECT id, join_token_hash AS joinTokenHash, paused FROM selfie_sessions
-    WHERE owner_user_id = ? AND closed_at IS NULL
+    WHERE owner_user_id = ? AND closed_at IS NULL AND (? IS NOT NULL OR id = ?)
     ORDER BY created_at DESC, id DESC LIMIT 1
-  `).get(session.ownerUserId)
+  `).get(session.ownerUserId, session.closedAt, session.id)
   return ongoing ? { id: ongoing.id, joinToken: selfieLiveJoinToken(ongoing.joinTokenHash), paused: Boolean(ongoing.paused) } : null
 }
 

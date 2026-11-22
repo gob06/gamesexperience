@@ -141,7 +141,9 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal(result.paused, false)
   assert.equal(result.rotationSeconds, 5)
   assert.equal(result.closed, false)
-  assert.equal(result.qrSession, null)
+  assert.equal(result.qrSession.id, session.id)
+  assert.equal(result.qrSession.paused, false)
+  assert.equal((await fetch(`${base}/api/selfie/join/${result.qrSession.joinToken}/status`)).status, 200)
   const photoUrl = (id, token = session.displayToken) => `${displayBase}/${id}/image?token=${token}`
   const photo = await fetch(photoUrl('approved-photo'))
   assert.equal(photo.status, 200)
@@ -226,6 +228,10 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal((await upload(session.joinToken)).status, 201)
   assert.equal((await upload(links.joinToken)).status, 201)
   const newestSession = await createSession()
+  const openQr = (await (await fetch(displayBase, { headers })).json()).qrSession
+  assert.equal(openQr.id, session.id, 'an open display keeps its own session QR even when newer sessions exist')
+  assert.equal((await upload(openQr.joinToken)).status, 201)
+  assert.equal(database.prepare('SELECT count(*) AS count FROM selfie_submissions WHERE session_id = ?').get(session.id).count, 5)
   assert.ok(database.prepare('SELECT id FROM selfie_sessions WHERE id = ?').get(session.id), 'creating another session must not delete old sessions')
   const close = await fetch(`${base}/api/selfie/sessions/${otherSession.id}/close`, { method: 'POST', headers: { Cookie: cookie } })
   assert.equal(close.status, 204)
@@ -299,7 +305,7 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal((await fetch(photoUrl('pending-photo', endedLinks.displayToken))).status, 200)
   assert.equal((await fetch(`${base}/api/selfie/join/${santaSession.joinToken}/status`)).status, 404)
   const afterRestart = (await (await fetch(historyUrl, { headers: adminHeaders })).json()).sessions
-  assert.ok(afterRestart.some((item) => item.id === session.id && item.closedAt && item.photoCount === 4))
+  assert.ok(afterRestart.some((item) => item.id === session.id && item.closedAt && item.photoCount === 5))
   assert.equal((await fetch(`${historyUrl}/${session.id}/submissions/approved-photo`, { method: 'DELETE', headers: adminHeaders })).status, 204)
   assert.equal((await fetch(photoUrl('approved-photo'))).status, 404)
   assert.equal((await fetch(`${historyUrl}/${session.id}`, { method: 'DELETE' })).status, 401)

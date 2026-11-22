@@ -16,8 +16,8 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
   const [ongoingQr, setOngoingQr] = useState<QrSession | null>(null)
   const [error, setError] = useState('')
   const [qrError, setQrError] = useState('')
-  const qrToken = closed ? ongoingQr?.joinToken || '' : joinToken
-  const qrSessionId = closed ? ongoingQr?.id || '' : sessionId
+  const qrToken = ongoingQr?.joinToken || (!closed ? joinToken : '')
+  const qrSessionId = ongoingQr?.id || (!closed ? sessionId : '')
   const joinUrl = preparedQr.token === qrToken ? preparedQr.url : ''
 
   useEffect(() => {
@@ -168,7 +168,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
       {qrToken && <aside className="selfie-display-qr">
         <div className="selfie-qr-frame">{joinUrl ? <canvas key={qrToken} ref={qrRef} aria-label="Scan to share your selfie" /> : <span role="status">{qrError || 'Preparing QR...'}</span>}</div>
         <p><Smartphone aria-hidden="true" />SCAN TO SHARE YOUR SELFIE</p>
-        {closed && ongoingQr?.paused && <span>Current session uploads are paused</span>}
+        {ongoingQr?.paused && <span>Current session uploads are paused</span>}
         {qrError && <span role="alert">{qrError}</span>}
       </aside>}
     </main>
