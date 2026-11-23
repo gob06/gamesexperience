@@ -9,10 +9,17 @@ const writeLockName = 'vote_write_lock'
 const transactionContext = new AsyncLocalStorage()
 
 export function readDatabaseConfig(env = process.env) {
-  if (String(env.DB_DRIVER || '').toLowerCase() === 'sqlite') {
+  if (String(env.DB_DRIVER || '').toLowerCase() === 'sqlite' || (!env.DATABASE_URL && (!env.DB_NAME || !env.DB_USER))) {
+    if (String(env.DB_DRIVER || '').toLowerCase() !== 'sqlite') {
+      console.warn('[AI Studio] Database credentials not configured — using local SQLite database')
+    }
+    const rawSqlitePath = String(env.SQLITE_PATH || '').trim()
+    const sqlitePath = rawSqlitePath && !/^leave\s+unset\b/i.test(rawSqlitePath)
+      ? rawSqlitePath
+      : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', 'roomvote-local.sqlite')
     return {
       driver: 'sqlite',
-      filename: path.resolve(env.SQLITE_PATH || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', 'roomvote-local.sqlite')),
+      filename: path.resolve(sqlitePath),
     }
   }
 
@@ -39,9 +46,6 @@ export function readDatabaseConfig(env = process.env) {
     }
   }
 
-  if (!env.DB_NAME || !env.DB_USER) {
-    throw new Error('Set DATABASE_URL (mysql://user:password@host:3306/database) or DB_HOST, DB_PORT, DB_USER, DB_PASSWORD and DB_NAME.')
-  }
   return {
     ...base,
     host: env.DB_HOST || '127.0.0.1',
