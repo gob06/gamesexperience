@@ -8,7 +8,7 @@ const duplicateTicketMessage = 'This ticket number has already been registered. 
 const registrationLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.RAFFLE_REGISTRATION_LIMIT_PER_MINUTE || 60) })
 
 const selectRaffle = database => database.prepare(`
-  SELECT id, title, draw_status AS drawStatus, draw_winner_count AS drawWinnerCount, created_at AS createdAt,
+  SELECT id, title, draw_status AS drawStatus, draw_winner_count AS drawWinnerCount, reset_version AS resetVersion, created_at AS createdAt,
     CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/logo?version=2') END AS logoUrl,
     CASE WHEN display_image_1 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/1?version=1') END AS displayImage1Url,
     CASE WHEN display_image_2 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/2?version=1') END AS displayImage2Url
@@ -34,6 +34,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
       SELECT raffle_sessions.id, raffle_sessions.title,
         raffle_sessions.draw_status AS drawStatus,
         raffle_sessions.draw_winner_count AS drawWinnerCount,
+        raffle_sessions.reset_version AS resetVersion,
         raffle_sessions.created_at AS createdAt,
         CASE WHEN raffle_sessions.logo IS NULL THEN NULL ELSE CONCAT('/api/raffles/', raffle_sessions.id, '/logo?version=2') END AS logoUrl,
         (SELECT COUNT(*) FROM raffle_entries WHERE raffle_id = raffle_sessions.id) AS entryCount,
@@ -79,6 +80,20 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     await database.prepare('DELETE FROM raffle_sessions WHERE id = ?').run(raffle.id)
     await audit(request, 'raffle.delete', 'raffle', raffle.id, { title: raffle.title })
     response.status(204).end()
+  })
+
+  app.post('/api/raffles/:id/reset', requireUser, async (request, response) => {
+    const reset = await inTransaction(async () => {
+      const raffle = await getRaffle.get(request.params.id)
+      if (!raffle) return null
+      const deleted = await database.prepare('DELETE FROM raffle_entries WHERE raffle_id = ?').run(raffle.id)
+      await database.prepare('UPDATE raffle_sessions SET draw_status = ?, draw_winner_count = ?, reset_version = ?, updated_at = ? WHERE id = ?')
+        .run('idle', 1, randomUUID(), new Date().toISOString(), raffle.id)
+      return { raffle: await getRaffle.get(raffle.id), deleted: deleted.changes }
+    })
+    if (!reset) return response.status(404).json({ error: 'This raffle could not be found.' })
+    await audit(request, 'raffle.reset', 'raffle', request.params.id, { title: reset.raffle.title, deleted: reset.deleted })
+    response.json(reset)
   })
 
   app.get('/api/raffles/:id/logo', async (request, response) => {
@@ -152,8 +167,9 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
       registeredAt: new Date().toISOString(),
     }
 
+    let registered
     try {
-      const registered = await inTransaction(async () => {
+      registered = await inTransaction(async () => {
         const currentRaffle = await getRaffle.get(raffle.id)
         if (!currentRaffle) return 'missing'
         if (currentRaffle.drawStatus === 'drawing') return 'drawing'
@@ -161,7 +177,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
           INSERT INTO raffle_entries (id, raffle_id, participant_name, ticket_number, ticket_key, registered_at, won_at)
           VALUES (?, ?, ?, ?, ?, ?, NULL)
         `).run(entry.id, entry.raffleId, entry.participantName, entry.ticketNumber, ticketKey(ticketNumber), entry.registeredAt)
-        return 'registered'
+        return { resetVersion: currentRaffle.resetVersion }
       })
       if (registered === 'missing') return response.status(404).json({ error: 'This raffle could not be found.' })
       if (registered === 'drawing') return response.status(423).json({ error: 'Registration is closed while the raffle draw is in progress.' })
@@ -170,7 +186,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
       throw error
     }
 
-    response.status(201).json({ id: entry.id, participantName, ticketNumber, registeredAt: entry.registeredAt })
+    response.status(201).json({ id: entry.id, participantName, ticketNumber, registeredAt: entry.registeredAt, resetVersion: registered.resetVersion })
   })
 
   app.get('/api/raffles/:id/host', requireUser, async (request, response) => {

@@ -56,7 +56,8 @@ const selectGameSql = `
   SELECT id, title, status, answer, scrambled,
     answer_revealed_at AS answerRevealedAt,
     created_at AS createdAt, updated_at AS updatedAt,
-    CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/logo?version=1') END AS logoUrl
+    CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/logo?version=1') END AS logoUrl,
+    CASE WHEN display_logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/display-logo?version=1') END AS displayLogoUrl
   FROM scramble_games
   WHERE id = ?
 `
@@ -67,6 +68,7 @@ function publicGame(game) {
     title: game.title,
     status: game.status,
     logoUrl: game.logoUrl,
+    displayLogoUrl: game.displayLogoUrl,
     // The scrambled word stays private until the host starts the game.
     scrambled: game.status === 'draft' ? null : game.scrambled,
     revealedAnswer: game.answerRevealedAt ? game.answer : null,
@@ -81,6 +83,7 @@ function hostGame(game) {
     title: game.title,
     status: game.status,
     logoUrl: game.logoUrl,
+    displayLogoUrl: game.displayLogoUrl,
     answer: game.answer,
     scrambled: game.scrambled,
     answerRevealed: Boolean(game.answerRevealedAt),
@@ -145,7 +148,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.json(games)
   })
 
-  app.post('/api/scrambles', requireUser, imageUpload.single('logo'), async (request, response) => {
+  app.post('/api/scrambles', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'displayLogo', maxCount: 1 }]), async (request, response) => {
     const title = typeof request.body.title === 'string' ? request.body.title.trim() : ''
     const answerInput = typeof request.body.answer === 'string' ? request.body.answer.normalize('NFKC').trim().replace(/\s+/g, ' ') : ''
     const scrambledInput = typeof request.body.scrambled === 'string' ? request.body.scrambled.normalize('NFKC').trim().replace(/\s+/g, ' ') : ''
@@ -153,15 +156,17 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     if (answerInput.length < 2 || answerInput.length > 120 || !answerPattern.test(answerInput)) return response.status(400).json({ error: 'Enter an answer word or phrase between 2 and 120 letters, numbers, and basic punctuation.' })
     const scrambled = scrambledInput ? scrambledInput.toUpperCase() : scrambleAnswer(answerInput)
     if (!isValidScramble(scrambled, answerInput)) return response.status(400).json({ error: 'The scrambled version must use exactly the same letters as the answer.' })
-    const logo = request.file
+    const logo = request.files?.logo?.[0]
+    const displayLogo = request.files?.displayLogo?.[0]
     if (logo && !hasValidImageSignature(logo.mimetype, logo.buffer)) return response.status(400).json({ error: 'QR logo is not a valid JPEG, PNG, or WebP image.' })
+    if (displayLogo && !hasValidImageSignature(displayLogo.mimetype, displayLogo.buffer)) return response.status(400).json({ error: 'Display logo is not a valid JPEG, PNG, or WebP image.' })
 
     const now = new Date().toISOString()
     const id = randomUUID()
     await database.prepare(`
-      INSERT INTO scramble_games (id, title, answer, scrambled, status, answer_revealed_at, logo_mime_type, logo, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?)
-    `).run(id, title, answerInput, scrambled, logo?.mimetype || null, logo?.buffer || null, request.user.id, now, now)
+      INSERT INTO scramble_games (id, title, answer, scrambled, status, answer_revealed_at, logo_mime_type, logo, display_logo_mime_type, display_logo, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, title, answerInput, scrambled, logo?.mimetype || null, logo?.buffer || null, displayLogo?.mimetype || null, displayLogo?.buffer || null, request.user.id, now, now)
     await audit(request, 'scramble.create', 'scramble', id, { title })
     response.status(201).json(hostGame(await getGame(id)))
   })
@@ -178,6 +183,12 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     const logo = await database.prepare('SELECT logo_mime_type AS mimeType, logo FROM scramble_games WHERE id = ?').get(request.params.id)
     if (!logo?.logo) return response.status(404).end()
     response.type(logo.mimeType).set('Cache-Control', 'no-store').send(Buffer.from(logo.logo))
+  })
+
+  app.get('/api/scrambles/:id/display-logo', async (request, response) => {
+    const logo = await database.prepare('SELECT display_logo_mime_type AS mimeType, display_logo AS logo FROM scramble_games WHERE id = ?').get(request.params.id)
+    if (!logo?.logo) return response.status(404).end()
+    response.type(logo.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(logo.logo))
   })
 
   app.put('/api/scrambles/:id/word', requireUser, async (request, response) => {
@@ -233,13 +244,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
   app.post('/api/scrambles/:id/reveal', requireUser, async (request, response) => {
     const game = await getGame(request.params.id)
     if (!game) return response.status(404).json({ error: 'This word scramble could not be found.' })
-    if (game.status === 'draft') return response.status(409).json({ error: 'Start the game before revealing the answer.' })
-    if (!game.answerRevealedAt) {
-      await database.prepare('UPDATE scramble_games SET answer_revealed_at = ?, updated_at = ? WHERE id = ?')
-        .run(new Date().toISOString(), new Date().toISOString(), game.id)
-      await audit(request, 'scramble.reveal', 'scramble', game.id)
-    }
-    response.json(hostGame(await getGame(game.id)))
+    response.status(409).json({ error: 'Announce confirmed winners to reveal the answer.' })
   })
 
   app.post('/api/scrambles/:id/reset', requireUser, async (request, response) => {
@@ -403,23 +408,31 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
 
   app.post('/api/scrambles/:id/winners/:entryId/announce', requireUser, async (request, response) => {
     const now = new Date().toISOString()
-    const announced = await database.prepare(`
-      UPDATE scramble_entries SET announced_at = ?
-      WHERE game_id = ? AND id = ? AND confirmed_at IS NOT NULL AND announced_at IS NULL
-    `).run(now, request.params.id, request.params.entryId)
-    if (!announced.changes) return response.status(409).json({ error: 'Only confirmed, unannounced winners can be announced.' })
+    const announced = await inTransaction(async () => {
+      const result = await database.prepare(`
+        UPDATE scramble_entries SET announced_at = ?
+        WHERE game_id = ? AND id = ? AND confirmed_at IS NOT NULL AND announced_at IS NULL
+      `).run(now, request.params.id, request.params.entryId)
+      if (result.changes) await database.prepare('UPDATE scramble_games SET answer_revealed_at = COALESCE(answer_revealed_at, ?), updated_at = ? WHERE id = ?').run(now, now, request.params.id)
+      return result.changes
+    })
+    if (!announced) return response.status(409).json({ error: 'Only confirmed, unannounced winners can be announced.' })
     await audit(request, 'scramble.winners.announce', 'scramble', request.params.id, { entryId: request.params.entryId })
     response.json({ ok: true })
   })
 
   app.post('/api/scrambles/:id/winners/announce-all', requireUser, async (request, response) => {
     const now = new Date().toISOString()
-    const announced = await database.prepare(`
-      UPDATE scramble_entries SET announced_at = ?
-      WHERE game_id = ? AND confirmed_at IS NOT NULL AND announced_at IS NULL
-    `).run(now, request.params.id)
-    if (!announced.changes) return response.status(409).json({ error: 'There are no confirmed winners waiting to be announced.' })
-    await audit(request, 'scramble.winners.announce-all', 'scramble', request.params.id, { count: announced.changes })
+    const announced = await inTransaction(async () => {
+      const result = await database.prepare(`
+        UPDATE scramble_entries SET announced_at = ?
+        WHERE game_id = ? AND confirmed_at IS NOT NULL AND announced_at IS NULL
+      `).run(now, request.params.id)
+      if (result.changes) await database.prepare('UPDATE scramble_games SET answer_revealed_at = COALESCE(answer_revealed_at, ?), updated_at = ? WHERE id = ?').run(now, now, request.params.id)
+      return result.changes
+    })
+    if (!announced) return response.status(409).json({ error: 'There are no confirmed winners waiting to be announced.' })
+    await audit(request, 'scramble.winners.announce-all', 'scramble', request.params.id, { count: announced })
     response.json({ ok: true })
   })
 
@@ -427,24 +440,22 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
   // It never exposes the correct answer before the reveal, the eligible pool,
   // or any part of the randomization process - only announced winners.
   app.get('/api/scrambles/:id/display', async (request, response) => {
-    const game = await getGame(request.params.id)
-    if (!game) return response.status(404).json({ error: 'This word scramble could not be found.' })
-    const [counts, announcedWinners] = await Promise.all([
-      database.prepare(`
+    const result = await inTransaction(async () => {
+      const game = await getGame(request.params.id)
+      if (!game) return null
+      const counts = await database.prepare(`
         SELECT COUNT(*) AS registrations,
           SUM(CASE WHEN answered_at IS NOT NULL THEN 1 ELSE 0 END) AS answered
         FROM scramble_entries WHERE game_id = ?
-      `).get(game.id),
-      database.prepare(`
+      `).get(game.id)
+      const announcedWinners = await database.prepare(`
         SELECT id, participant_name AS participantName, ticket_number AS ticketNumber, announced_at AS announcedAt
         FROM scramble_entries WHERE game_id = ? AND announced_at IS NOT NULL
         ORDER BY announced_at, id
-      `).all(game.id),
-    ])
-    response.set('Cache-Control', 'no-store').json({
-      game: publicGame(game),
-      counts: { registrations: Number(counts.registrations || 0), answered: Number(counts.answered || 0) },
-      announcedWinners,
+      `).all(game.id)
+      return { game: publicGame(game), counts: { registrations: Number(counts.registrations || 0), answered: Number(counts.answered || 0) }, announcedWinners }
     })
+    if (!result) return response.status(404).json({ error: 'This word scramble could not be found.' })
+    response.set('Cache-Control', 'no-store').json(result)
   })
 }

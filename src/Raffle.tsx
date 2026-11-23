@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import QRCode from 'qrcode'
-import { ArrowLeft, ArrowUpRight, Check, Copy, ImagePlus, LogOut, MonitorPlay, Play, QrCode, Shuffle, Smartphone, Square, Ticket, Trash2, Trophy, X } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Check, Copy, ImagePlus, LogOut, MonitorPlay, Play, QrCode, RefreshCw, Shuffle, Smartphone, Square, Ticket, Trash2, Trophy, X } from 'lucide-react'
 import { ThemeBrand, useTheme } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
+import { DisplayWinners } from './DisplayWinners'
 
 type Raffle = {
   id: string
@@ -15,6 +16,7 @@ type Raffle = {
   createdAt: string
   drawStatus: 'idle' | 'drawing'
   drawWinnerCount: number
+  resetVersion: string | null
   entryCount?: number
   winnerCount?: number
   registrationOpen?: boolean
@@ -242,18 +244,7 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
                   {rollingEntry && <span className="raffle-screen-ticket">TICKET {rollingEntry.ticketNumber}</span>}
                 </div>
               ) : hasWinners && (
-                <div className="raffle-screen-winners">
-                  <h2>{displayWinners.length} {displayWinners.length === 1 ? 'winner' : 'winners'}</h2>
-                  <ol className="raffle-screen-winner-list" aria-label="Latest draw winners">
-                    {displayWinners.map((entry, index) => (
-                      <li key={entry.id}>
-                        <span className="raffle-screen-winner-rank"><Trophy aria-hidden="true" /> {index + 1}</span>
-                        <strong>{entry.participantName}</strong>
-                        <span className="raffle-screen-ticket">TICKET {entry.ticketNumber}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
+                <DisplayWinners winners={displayWinners} label="Latest draw winners" />
               )}
             </div>
           </div>
@@ -269,17 +260,21 @@ export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
   const [participantName, setParticipantName] = useState('')
   const [ticketNumber, setTicketNumber] = useState('')
   const [registered, setRegistered] = useState(false)
+  const [registeredVersion, setRegisteredVersion] = useState<string | null>(null)
+  const [resetNotice, setResetNotice] = useState('')
   const [showAd, setShowAd] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const refreshGeneration = useRef(0)
 
   useEffect(() => {
     let active = true
     async function refresh() {
+      const generation = refreshGeneration.current
       try {
         const data = await requestJson<Raffle>(`/api/raffles/${encodeURIComponent(raffleId)}`)
-        if (!active) return
+        if (!active || generation !== refreshGeneration.current) return
         setRaffle(data)
         setError('')
       } catch (caught) {
@@ -293,22 +288,35 @@ export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
     return () => { active = false; window.clearInterval(timer) }
   }, [raffleId])
 
+  useEffect(() => {
+    if (registered && raffle && raffle.resetVersion !== registeredVersion) {
+      setRegistered(false)
+      setShowAd(false)
+      setResetNotice('This raffle was reset. Please register your ticket again.')
+    }
+  }, [registered, registeredVersion, raffle])
+
   async function register(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!raffle?.registrationOpen) return
+    refreshGeneration.current++
     setBusy(true)
     setError('')
+    setResetNotice('')
     try {
-      await requestJson(`/api/raffles/${encodeURIComponent(raffleId)}/register`, {
+      const result = await requestJson<{ resetVersion: string | null }>(`/api/raffles/${encodeURIComponent(raffleId)}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ participantName, ticketNumber }),
       })
+      setRegisteredVersion(result.resetVersion)
+      setRaffle((current) => current ? { ...current, resetVersion: result.resetVersion } : current)
       setRegistered(true)
       setShowAd(true)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not register this ticket.')
     } finally {
+      refreshGeneration.current++
       setBusy(false)
     }
   }
@@ -325,6 +333,7 @@ export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
               <div className="raffle-success" role="status"><Check size={26} /><strong>Your ticket is registered.</strong><span>Good luck, {participantName.trim()}!</span></div>
             ) : raffle.registrationOpen ? (
               <form className="raffle-entry-form" onSubmit={(event) => void register(event)}>
+                {resetNotice && <p className="raffle-notice" role="status">{resetNotice}</p>}
                 <label htmlFor="raffle-participant-name">Ticket holder name</label>
                 <input id="raffle-participant-name" autoComplete="name" maxLength={80} value={participantName} onChange={(event) => setParticipantName(event.target.value)} placeholder="Enter your name" required />
                 <label htmlFor="raffle-ticket-number">Ticket number</label>
@@ -367,6 +376,9 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const logoInputRef = useRef<HTMLInputElement>(null)
+  const selectedIdRef = useRef(selectedId)
+  selectedIdRef.current = selectedId
+  const refreshGeneration = useRef(0)
   const isDrawing = activeRaffle?.drawStatus === 'drawing'
   const activeLogoUrl = activeRaffle?.logoUrl || assetUrls.logo || null
 
@@ -400,12 +412,13 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     }
     let active = true
     async function refresh() {
+      const generation = refreshGeneration.current
       try {
         const [data, url] = await Promise.all([
           requestJson<HostRaffleData>(`/api/raffles/${encodeURIComponent(selectedId)}/host`),
           raffleJoinUrl(selectedId),
         ])
-        if (!active) return
+        if (!active || generation !== refreshGeneration.current) return
         if (!Array.isArray(data.latestWinners) || !Number.isSafeInteger(data.raffle.drawWinnerCount) || data.raffle.drawWinnerCount < 1) {
           throw new Error('The raffle server is out of date. Restart the API server, then refresh this page.')
         }
@@ -482,6 +495,35 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
       if (selectedId === raffle.id) setNotice('Raffle deleted.')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not delete raffle.')
+    }
+  }
+
+  async function resetRaffle() {
+    if (!activeRaffle || busy || !window.confirm(`Reset "${activeRaffle.title}"? All registrations and winner history will be permanently deleted, and any active draw will stop. The raffle and its QR link will be kept.`)) return
+    const id = activeRaffle.id
+    refreshGeneration.current++
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await requestJson<{ raffle: Raffle }>(`/api/raffles/${encodeURIComponent(id)}/reset`, { method: 'POST' })
+      if (selectedIdRef.current === id) {
+        setActiveRaffle(result.raffle)
+        setEntries([])
+        setEligible([])
+        setWinners([])
+        setLatestWinners([])
+        setRollingEntry(null)
+        setWinnerCount('1')
+        setTab('qr')
+        setNotice('Raffle reset. Registrations and winner history were deleted.')
+      }
+      setRaffles((current) => current.map((raffle) => raffle.id === id ? { ...raffle, drawStatus: 'idle', drawWinnerCount: 1, entryCount: 0, winnerCount: 0 } : raffle))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not reset the raffle.')
+    } finally {
+      refreshGeneration.current++
+      setBusy(false)
     }
   }
 
@@ -643,6 +685,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                   <div><span className="raffle-kicker">ACTIVE RAFFLE</span><h2>{activeRaffle.title}</h2></div>
                   <div className="raffle-heading-actions">
                     <a className="button button-secondary raffle-display-link" href={`/raffle/${activeRaffle.id}/display`}><MonitorPlay size={16} /> Open display</a>
+                    <button className="button button-secondary" type="button" disabled={busy} onClick={() => void resetRaffle()}><RefreshCw size={16} /> Reset event</button>
                     <div className="raffle-counts"><span><strong>{entries.length}</strong> registered</span><span><strong>{winners.length}</strong> winners</span></div>
                   </div>
                 </div>
