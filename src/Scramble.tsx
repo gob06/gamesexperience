@@ -97,6 +97,14 @@ type DisplayData = {
 
 type ScrambleTab = 'qr' | 'game' | 'participants' | 'winners'
 
+type PendingConfirmation = {
+  kicker: string
+  title: string
+  message: string
+  confirmLabel: string
+  onConfirm: () => Promise<void> | void
+}
+
 const statusLabels: Record<ScrambleStatus, string> = {
   draft: 'Not started',
   active: 'Game active',
@@ -494,6 +502,8 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null)
+  const [confirmBusy, setConfirmBusy] = useState(false)
 
   const game = data?.game || null
   const stats = data?.stats || null
@@ -560,6 +570,15 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
     setWordScrambled(game.scrambled)
   }, [game, editingWord])
 
+  useEffect(() => {
+    if (!pendingConfirmation) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !confirmBusy) setPendingConfirmation(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [pendingConfirmation, confirmBusy])
+
   async function refreshList() {
     try {
       setGames(await requestJson<ScrambleSummary[]>('/api/scrambles'))
@@ -596,19 +615,26 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
     }
   }
 
-  async function deleteGame(target: ScrambleSummary) {
-    if (!window.confirm(`Delete "${target.title}"? All registrations, answers, and winner history will be removed.`)) return
-    setError('')
-    setNotice('')
-    try {
-      const response = await fetch(`/api/scrambles/${encodeURIComponent(target.id)}`, { method: 'DELETE' })
-      if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error || 'Could not delete the word scramble.')
-      const remaining = games.filter((item) => item.id !== target.id)
-      setGames(remaining)
-      setSelectedId((current) => current === target.id ? remaining[0]?.id || '' : current)
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not delete the word scramble.')
-    }
+  function deleteGame(target: ScrambleSummary) {
+    setPendingConfirmation({
+      kicker: 'DELETE WORD SCRAMBLE',
+      title: `Delete "${target.title}"?`,
+      message: 'All registrations, answers, and winner history will be removed.',
+      confirmLabel: 'Delete game',
+      onConfirm: async () => {
+        setError('')
+        setNotice('')
+        try {
+          const response = await fetch(`/api/scrambles/${encodeURIComponent(target.id)}`, { method: 'DELETE' })
+          if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error || 'Could not delete the word scramble.')
+          const remaining = games.filter((item) => item.id !== target.id)
+          setGames(remaining)
+          setSelectedId((current) => current === target.id ? remaining[0]?.id || '' : current)
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : 'Could not delete the word scramble.')
+        }
+      },
+    })
   }
 
   function selectLogo(event: ChangeEvent<HTMLInputElement>) {
@@ -662,7 +688,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
   }
 
   async function applyHostAction(run: () => Promise<unknown>, successNotice = '') {
-    if (!game) return
+    if (!game) return false
     setBusy(true)
     setError('')
     setNotice('')
@@ -672,17 +698,29 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
       setData(hostData)
       if (successNotice) setNotice(successNotice)
       void refreshList()
+      return true
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The action could not be completed.')
+      return false
     } finally {
       setBusy(false)
     }
   }
 
-  function statusAction(action: 'start' | 'pause' | 'resume' | 'close' | 'complete', confirmMessage?: string) {
+  function statusAction(
+    action: 'start' | 'pause' | 'resume' | 'close' | 'complete',
+    confirmation?: { kicker: string; title: string; message: string; confirmLabel: string },
+  ) {
     if (!game) return
-    if (confirmMessage && !window.confirm(confirmMessage)) return
-    void applyHostAction(() => postJson(`/api/scrambles/${encodeURIComponent(game.id)}/status`, { action }))
+    const targetId = game.id
+    const run = async () => {
+      await applyHostAction(() => postJson(`/api/scrambles/${encodeURIComponent(targetId)}/status`, { action }))
+    }
+    if (confirmation) {
+      setPendingConfirmation({ ...confirmation, onConfirm: run })
+      return
+    }
+    void run()
   }
 
   async function reshuffleWord() {
@@ -698,20 +736,48 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
 
   function saveWord() {
     if (!game) return
+    const targetId = game.id
     const afterStart = game.status !== 'draft'
-    if (afterStart && !window.confirm('The game has already started. Replacing the word changes what counts as a correct answer for everyone. Continue?')) return
-    void applyHostAction(
-      () => requestJson(`/api/scrambles/${encodeURIComponent(game.id)}/word`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answer: wordAnswer.trim(), scrambled: wordScrambled.trim(), confirm: afterStart }),
-      }),
-      'Word updated.',
-    ).then(() => setEditingWord(false))
+    const runSave = async () => {
+      const ok = await applyHostAction(
+        () => requestJson(`/api/scrambles/${encodeURIComponent(targetId)}/word`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answer: wordAnswer.trim(), scrambled: wordScrambled.trim(), confirm: afterStart }),
+        }),
+        'Word updated.',
+      )
+      if (ok) setEditingWord(false)
+    }
+    if (afterStart) {
+      setPendingConfirmation({
+        kicker: 'REPLACE WORD',
+        title: 'Save word change?',
+        message: 'The game has already started. Replacing the word changes what counts as a correct answer for everyone. Continue?',
+        confirmLabel: 'Save word',
+        onConfirm: runSave,
+      })
+      return
+    }
+    void runSave()
   }
 
-  const announceOne = (entry: ScrambleEntry) =>
-    { if (window.confirm(`Announce ${entry.participantName} and reveal the correct answer on the audience display?`)) void applyHostAction(() => postJson(`/api/scrambles/${encodeURIComponent(game!.id)}/winners/${encodeURIComponent(entry.id)}/announce`), `${entry.participantName} and the correct answer are shown on the display.`) }
+  const announceOne = (entry: ScrambleEntry) => {
+    if (!game) return
+    const targetId = game.id
+    setPendingConfirmation({
+      kicker: 'ANNOUNCE WINNER',
+      title: `Announce ${entry.participantName}?`,
+      message: `Show ${entry.participantName} and reveal the correct answer on the audience display?`,
+      confirmLabel: 'Announce winner',
+      onConfirm: async () => {
+        await applyHostAction(
+          () => postJson(`/api/scrambles/${encodeURIComponent(targetId)}/winners/${encodeURIComponent(entry.id)}/announce`),
+          `${entry.participantName} and the correct answer are shown on the display.`,
+        )
+      },
+    })
+  }
 
   async function copyLink() {
     try {
@@ -792,7 +858,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                   <button type="button" className="raffle-session-select" onClick={() => { setSelectedId(item.id); setTab('qr'); setEditingWord(false) }}>
                     <span>{item.title}</span><small>{statusLabels[item.status]} · {item.entryCount ?? 0} registered · {item.winnerCount ?? 0} winners</small>
                   </button>
-                  <button className="icon-button raffle-session-delete" type="button" onClick={() => void deleteGame(item)} aria-label={`Delete ${item.title}`} title="Delete word scramble"><Trash2 size={16} /></button>
+                  <button className="icon-button raffle-session-delete" type="button" onClick={() => deleteGame(item)} aria-label={`Delete ${item.title}`} title="Delete word scramble"><Trash2 size={16} /></button>
                 </div>
               ))}
             </section>
@@ -830,12 +896,58 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                 {tab === 'game' && (
                   <section className="scramble-game-view" role="tabpanel">
                     <div className="scramble-controls">
-                      {game.status === 'draft' && <button className="button button-primary" disabled={busy} onClick={() => statusAction('start')}><Play size={16} /> Start game</button>}
-                      {game.status === 'active' && <button className="button button-secondary" disabled={busy} onClick={() => statusAction('pause')}><Pause size={16} /> Pause</button>}
-                      {game.status === 'paused' && <button className="button button-primary" disabled={busy} onClick={() => statusAction('resume')}><Play size={16} /> Resume</button>}
-                      {(game.status === 'active' || game.status === 'paused') && <button className="button button-secondary" disabled={busy} onClick={() => statusAction('close', 'Close the game? Participants will no longer be able to register or submit answers.')}><Square size={16} /> Close game</button>}
-                      {game.status === 'closed' && <button className="button button-secondary" disabled={busy} onClick={() => statusAction('complete', 'End the event? The display will switch to the completion screen.')}><CircleCheck size={16} /> End event</button>}
-                      <button className="button button-quiet scramble-reset" disabled={busy} onClick={() => { if (window.confirm('Reset the event? ALL registrations, answers, and winners will be permanently deleted and the game returns to Not started.')) void applyHostAction(() => postJson(`/api/scrambles/${encodeURIComponent(game.id)}/reset`), 'Event reset.') }}><RefreshCw size={16} /> Reset event</button>
+                      {game.status === 'draft' && <button className="button button-primary" type="button" disabled={busy} onClick={() => statusAction('start')}><Play size={16} /> Start game</button>}
+                      {game.status === 'active' && <button className="button button-secondary" type="button" disabled={busy} onClick={() => statusAction('pause')}><Pause size={16} /> Pause</button>}
+                      {game.status === 'paused' && <button className="button button-primary" type="button" disabled={busy} onClick={() => statusAction('resume')}><Play size={16} /> Resume</button>}
+                      {(game.status === 'active' || game.status === 'paused') && (
+                        <button
+                          className="button button-secondary"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => statusAction('close', {
+                            kicker: 'CLOSE GAME',
+                            title: 'Close the game?',
+                            message: 'Participants will no longer be able to register or submit answers.',
+                            confirmLabel: 'Close game',
+                          })}
+                        >
+                          <Square size={16} /> Close game
+                        </button>
+                      )}
+                      {game.status === 'closed' && (
+                        <button
+                          className="button button-secondary"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => statusAction('complete', {
+                            kicker: 'END EVENT',
+                            title: 'End the event?',
+                            message: 'The display will switch to the completion screen.',
+                            confirmLabel: 'End event',
+                          })}
+                        >
+                          <CircleCheck size={16} /> End event
+                        </button>
+                      )}
+                      <button
+                        className="button button-quiet scramble-reset"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          const targetId = game.id
+                          setPendingConfirmation({
+                            kicker: 'RESET EVENT',
+                            title: 'Reset the event?',
+                            message: 'ALL registrations, answers, and winners will be permanently deleted and the game returns to Not started.',
+                            confirmLabel: 'Reset event',
+                            onConfirm: async () => {
+                              await applyHostAction(() => postJson(`/api/scrambles/${encodeURIComponent(targetId)}/reset`), 'Event reset.')
+                            },
+                          })
+                        }}
+                      >
+                        <RefreshCw size={16} /> Reset event
+                      </button>
                     </div>
 
                     <div className="scramble-stats" aria-label="Live statistics">
@@ -910,7 +1022,31 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                         <div className="scramble-randomize-row">
                           <label htmlFor="scramble-winner-count">Number of winners</label>
                           <input id="scramble-winner-count" type="number" min={1} max={Math.max(1, stats.eligible + stats.selected)} value={winnerCount} onChange={(event) => setWinnerCount(Math.max(1, Number(event.target.value) || 1))} />
-                          <button className="button button-primary" disabled={busy || game.status === 'completed'} onClick={() => { if (window.confirm(`Securely randomize ${winnerCount} winner${winnerCount === 1 ? '' : 's'} from ${stats.eligible + stats.selected} eligible participants?${selectedWinners.length ? ' The current unconfirmed selection will be replaced.' : ''}`)) void applyHostAction(() => postJson(`/api/scrambles/${encodeURIComponent(game.id)}/winners/randomize`, { count: winnerCount }), 'Winners selected. Review them below, then confirm.') }}><Shuffle size={16} /> Randomize winners</button>
+                          <button
+                            className="button button-primary"
+                            type="button"
+                            disabled={busy || game.status === 'completed'}
+                            onClick={() => {
+                              const targetId = game.id
+                              const count = winnerCount
+                              const eligibleTotal = stats.eligible + stats.selected
+                              const hasUnconfirmed = selectedWinners.length > 0
+                              setPendingConfirmation({
+                                kicker: 'RANDOMIZE WINNERS',
+                                title: `Draw ${count} winner${count === 1 ? '' : 's'}?`,
+                                message: `Securely randomize ${count} winner${count === 1 ? '' : 's'} from ${eligibleTotal} eligible participants?${hasUnconfirmed ? ' The current unconfirmed selection will be replaced.' : ''}`,
+                                confirmLabel: 'Randomize winners',
+                                onConfirm: async () => {
+                                  await applyHostAction(
+                                    () => postJson(`/api/scrambles/${encodeURIComponent(targetId)}/winners/randomize`, { count }),
+                                    'Winners selected. Review them below, then confirm.',
+                                  )
+                                },
+                              })
+                            }}
+                          >
+                            <Shuffle size={16} /> Randomize winners
+                          </button>
                         </div>
                         <p className="raffle-help">Selection runs on the server with cryptographically secure randomness. It is never shown on the audience display.</p>
                       </div>
@@ -922,7 +1058,29 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                         <ul className="scramble-winner-list">
                           {selectedWinners.map((entry) => <li key={entry.id}><strong>{entry.participantName}</strong><span>Ticket {entry.ticketNumber}</span></li>)}
                         </ul>
-                        <button className="button button-primary" disabled={busy} onClick={() => { if (window.confirm(`Confirm ${selectedWinners.length} winner${selectedWinners.length === 1 ? '' : 's'}? Confirmed winners can then be announced on the display.`)) void applyHostAction(() => postJson(`/api/scrambles/${encodeURIComponent(game.id)}/winners/confirm`), 'Winners confirmed. Announce them when ready.') }}><CircleCheck size={16} /> Confirm winners</button>
+                        <button
+                          className="button button-primary"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            const targetId = game.id
+                            const count = selectedWinners.length
+                            setPendingConfirmation({
+                              kicker: 'CONFIRM WINNERS',
+                              title: `Confirm ${count} winner${count === 1 ? '' : 's'}?`,
+                              message: 'Confirmed winners can then be announced on the display.',
+                              confirmLabel: 'Confirm winners',
+                              onConfirm: async () => {
+                                await applyHostAction(
+                                  () => postJson(`/api/scrambles/${encodeURIComponent(targetId)}/winners/confirm`),
+                                  'Winners confirmed. Announce them when ready.',
+                                )
+                              },
+                            })
+                          }}
+                        >
+                          <CircleCheck size={16} /> Confirm winners
+                        </button>
                       </div>
                     )}
 
@@ -935,12 +1093,33 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                               <strong>{entry.participantName}</strong><span>Ticket {entry.ticketNumber}</span>
                               {entry.announcedAt
                                 ? <span className="scramble-pill is-winner"><Megaphone size={13} /> Announced</span>
-                                : <button className="button button-secondary" disabled={busy} onClick={() => announceOne(entry)}><Megaphone size={14} /> Announce</button>}
+                                : <button className="button button-secondary" type="button" disabled={busy} onClick={() => announceOne(entry)}><Megaphone size={14} /> Announce</button>}
                             </li>
                           ))}
                         </ul>
                         {confirmedWinners.some((entry) => !entry.announcedAt) && (
-                          <button className="button button-primary" disabled={busy} onClick={() => { if (window.confirm('Announce all confirmed winners and reveal the correct answer on the audience display?')) void applyHostAction(() => postJson(`/api/scrambles/${encodeURIComponent(game.id)}/winners/announce-all`), 'All winners and the correct answer are shown on the display.') }}><Megaphone size={16} /> Announce all winners</button>
+                          <button
+                            className="button button-primary"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              const targetId = game.id
+                              setPendingConfirmation({
+                                kicker: 'ANNOUNCE ALL WINNERS',
+                                title: 'Announce all confirmed winners?',
+                                message: 'All confirmed winners and the correct answer will be revealed on the audience display.',
+                                confirmLabel: 'Announce all',
+                                onConfirm: async () => {
+                                  await applyHostAction(
+                                    () => postJson(`/api/scrambles/${encodeURIComponent(targetId)}/winners/announce-all`),
+                                    'All winners and the correct answer are shown on the display.',
+                                  )
+                                },
+                              })
+                            }}
+                          >
+                            <Megaphone size={16} /> Announce all winners
+                          </button>
                         )}
                       </div>
                     )}
@@ -955,6 +1134,57 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
           </section>
         </section>
       </div>
+      {pendingConfirmation && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !confirmBusy) setPendingConfirmation(null)
+          }}
+        >
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="scramble-confirm-title">
+            <button
+              className="icon-button modal-close"
+              type="button"
+              onClick={() => setPendingConfirmation(null)}
+              aria-label="Close"
+              disabled={confirmBusy}
+            >
+              <X size={19} />
+            </button>
+            <div className="modal-kicker">{pendingConfirmation.kicker}</div>
+            <h2 id="scramble-confirm-title">{pendingConfirmation.title}</h2>
+            <p className="share-question">{pendingConfirmation.message}</p>
+            <div className="create-game-actions">
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={() => setPendingConfirmation(null)}
+                disabled={confirmBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="button button-primary"
+                type="button"
+                autoFocus
+                disabled={confirmBusy}
+                onClick={async () => {
+                  const action = pendingConfirmation.onConfirm
+                  setConfirmBusy(true)
+                  try {
+                    await action()
+                  } finally {
+                    setConfirmBusy(false)
+                    setPendingConfirmation(null)
+                  }
+                }}
+              >
+                {confirmBusy ? 'Working…' : pendingConfirmation.confirmLabel}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   )
 }

@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"node server/index.js\" \"vite --host 0.0.0.0\"",
+    "dev": "NODE_ENV=development node server/index.js",
     "build": "tsc -b && vite build",
-    "start": "node server/index.js",
+    "start": "NODE_ENV=production node server/index.js",
     "migrate:mariadb": "node scripts/migrate-sqlite-to-mariadb.js"
   },
   "dependencies": {

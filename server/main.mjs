@@ -14,26 +14,34 @@ import { rateLimit } from './rate-limit.mjs'
 import { defaultTerms } from './defaultTerms.mjs'
 
 const app = express()
-const port = Number(process.env.PORT || 4179)
+const envPort = Number(process.env.PORT)
+const nginxPort = Number(process.env.NGINX_PORT)
+const port = Number.isInteger(envPort) && envPort > 0 && envPort !== nginxPort
+  ? envPort
+  : Number(process.env.DEFAULT_APP_PORT || 3000)
 const themeImageMaxBytes = Number(process.env.THEME_IMAGE_MAX_BYTES || 50 * 1024 * 1024)
 const adVideoMaxBytes = Number(process.env.AD_VIDEO_MAX_BYTES || 200 * 1024 * 1024)
 if (!Number.isSafeInteger(adVideoMaxBytes) || adVideoMaxBytes < 1 || adVideoMaxBytes > 1024 * 1024 * 1024) {
   throw new Error('AD_VIDEO_MAX_BYTES must be between 1 byte and 1 GB.')
 }
 const votingSessionDurationSeconds = Number(process.env.VOTING_SESSION_DURATION_SECONDS || 7 * 24 * 60 * 60)
-const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS || 0)
+const rawTrustProxy = String(process.env.TRUST_PROXY_HOPS ?? '').trim()
+const parsedTrustProxy = rawTrustProxy.toLowerCase() === 'true' ? 1 : Number(rawTrustProxy || 0)
+const trustedProxyHops = Number.isSafeInteger(parsedTrustProxy) && parsedTrustProxy >= 0
+  ? Math.min(parsedTrustProxy, 5)
+  : 0
 if (!Number.isSafeInteger(themeImageMaxBytes) || themeImageMaxBytes < 1 || themeImageMaxBytes > 200 * 1024 * 1024) {
   throw new Error('THEME_IMAGE_MAX_BYTES must be between 1 byte and 200 MB.')
 }
 if (!Number.isSafeInteger(votingSessionDurationSeconds) || votingSessionDurationSeconds < 60 || votingSessionDurationSeconds > 90 * 24 * 60 * 60) {
   throw new Error('VOTING_SESSION_DURATION_SECONDS must be between 60 seconds and 90 days.')
 }
-if (!Number.isSafeInteger(trustedProxyHops) || trustedProxyHops < 0 || trustedProxyHops > 5) {
-  throw new Error('TRUST_PROXY_HOPS must be between 0 and 5.')
-}
 app.set('trust proxy', trustedProxyHops)
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const dataDirectory = path.resolve(process.env.DATA_DIR || path.join(root, 'data'))
+const rawDataDir = String(process.env.DATA_DIR || '').trim()
+const dataDirectory = path.resolve(
+  rawDataDir && !/^leave\s+unset\b/i.test(rawDataDir) ? rawDataDir : path.join(root, 'data'),
+)
 const legacyPollsFile = path.join(dataDirectory, 'polls.json')
 const themeAssetsDirectory = path.join(dataDirectory, 'theme-assets')
 const adVideosDirectory = path.join(dataDirectory, 'ad-videos')
@@ -290,9 +298,14 @@ function getVotingCookieName(pollId) {
   return `vote_ballot_${pollKey}`
 }
 
+function cookieSecurityFlags(request) {
+  const forwardedHost = request.get('x-forwarded-host') || ''
+  const isHttpsProxy = request.secure || request.get('x-forwarded-proto') === 'https' || forwardedHost.endsWith('.run.app')
+  return isHttpsProxy ? '; SameSite=None; Secure' : '; SameSite=Lax'
+}
+
 function setVotingSessionCookie(request, response, pollId, token) {
-  const secure = request.secure ? '; Secure' : ''
-  response.setHeader('Set-Cookie', `${getVotingCookieName(pollId)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${votingSessionDurationSeconds}${secure}`)
+  response.setHeader('Set-Cookie', `${getVotingCookieName(pollId)}=${token}; Path=/; HttpOnly; Max-Age=${votingSessionDurationSeconds}${cookieSecurityFlags(request)}`)
 }
 
 async function getCurrentUser(request) {
@@ -316,8 +329,7 @@ async function setSessionCookie(request, response, userId) {
   const token = randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + sessionDurationSeconds * 1000).toISOString()
   await database.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(hashSessionToken(token), userId, expiresAt)
-  const secure = request.secure ? '; Secure' : ''
-  response.setHeader('Set-Cookie', `vote_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${sessionDurationSeconds}${secure}`)
+  response.setHeader('Set-Cookie', `vote_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Max-Age=${sessionDurationSeconds}${cookieSecurityFlags(request)}`)
 }
 
 async function requireUser(request, response, next) {
@@ -412,7 +424,7 @@ app.post('/api/auth/login', rateLimit({ windowMs: 60_000, max: 20, message: 'Too
 app.post('/api/auth/logout', async (request, response) => {
   const token = getSessionToken(request)
   if (token) await database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashSessionToken(token))
-  response.setHeader('Set-Cookie', 'vote_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
+  response.setHeader('Set-Cookie', `vote_session=; Path=/; HttpOnly; Max-Age=0${cookieSecurityFlags(request)}`)
   response.status(204).end()
 })
 
@@ -1615,9 +1627,17 @@ app.use((error, _request, response, _next) => {
 app.use('/api', (_request, response) => response.status(404).json({ error: 'API endpoint not found.' }))
 
 const buildDirectory = path.join(root, 'dist')
-if (existsSync(buildDirectory)) {
+if (process.env.NODE_ENV !== 'development' && existsSync(buildDirectory)) {
   app.use(express.static(buildDirectory))
   app.get('*', (_request, response) => response.sendFile(path.join(buildDirectory, 'index.html')))
+} else {
+  const { createServer: createViteServer } = await import('vite')
+  const vite = await createViteServer({
+    root,
+    server: { middlewareMode: true, hmr: false, allowedHosts: true },
+    appType: 'spa',
+  })
+  app.use(vite.middlewares)
 }
 
 app.listen(port, '0.0.0.0', () => {
