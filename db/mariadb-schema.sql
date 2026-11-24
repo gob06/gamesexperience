@@ -335,6 +335,10 @@ CREATE TABLE IF NOT EXISTS scramble_games (
 
 ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_logo_mime_type VARCHAR(100) NULL;
 ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_logo LONGBLOB NULL;
+ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_1_mime_type VARCHAR(100) NULL;
+ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_1 LONGBLOB NULL;
+ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_2_mime_type VARCHAR(100) NULL;
+ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_2 LONGBLOB NULL;
 
 CREATE TABLE IF NOT EXISTS scramble_entries (
   id VARCHAR(64) NOT NULL PRIMARY KEY,

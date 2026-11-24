@@ -1982,6 +1982,8 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .scramble-screen-shell::before { position: absolute; z-index: -1; inset: 0; background: repeating-linear-gradient(133deg, transparent 0 90px, rgba(255, 255, 255, .03) 91px 92px, transparent 93px 180px), radial-gradient(circle, rgba(255, 255, 255, .07) 0 1px, transparent 1.8px); background-size: auto, 14px 14px; content: ''; pointer-events: none; }
 .scramble-screen-intro, .scramble-screen-stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(12px, 2.6vh, 30px); width: 100%; text-align: center; }
 .scramble-screen-title { max-width: 100%; margin: 0; font-size: 120px; font-weight: 800; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.scramble-screen-event { width: 100%; flex-shrink: 0; }
+.scramble-screen-event .scramble-screen-title { color: inherit; font: inherit; font-size: 120px; font-weight: 800; line-height: normal; letter-spacing: -.02em; text-shadow: none; }
 .scramble-screen-logo { display: block; flex-shrink: 0; width: 760px; height: 200px; max-width: 100%; object-fit: contain; object-position: center; }
 .scramble-screen-subtitle { display: inline-flex; align-items: center; gap: 12px; margin: 0; color: var(--theme-primary, #d9f7a2); font-size: clamp(17px, 2.8vh, 32px); font-weight: 700; letter-spacing: .1em; }
 .scramble-screen-qr canvas { display: block; width: min(58vmin, 760px) !important; height: min(58vmin, 760px) !important; aspect-ratio: 1; border-radius: 14px; background: #fff; }
@@ -1993,11 +1995,26 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .scramble-screen-corner-qr span { color: var(--theme-primary, #d9f7a2); font-size: clamp(12px, 1.6vh, 17px); font-weight: 700; letter-spacing: .08em; }
 .scramble-screen-reveal { width: 100%; min-width: 0; }
 .scramble-screen-reveal .scramble-word { display: flex; width: 100%; }
-.scramble-screen-reveal .scramble-word-letter { border-color: color-mix(in srgb, var(--theme-secondary, #f4cf51), transparent 60%); color: var(--theme-secondary, #ffeaa3); font-size: clamp(24px, 3vw, 48px); background: color-mix(in srgb, var(--theme-background, #201b09), white 10%); animation: scramble-reveal-pop .55s cubic-bezier(.2, 1.4, .4, 1) both; }
+.scramble-screen-reveal .scramble-word-letter { border-color: color-mix(in srgb, var(--theme-secondary, #f4cf51), transparent 60%); color: var(--theme-secondary, #ffeaa3); font-size: 100px; background: color-mix(in srgb, var(--theme-background, #201b09), white 10%); animation: scramble-reveal-pop .55s cubic-bezier(.2, 1.4, .4, 1) both; }
 .scramble-screen-shell:is(.is-winners, .is-completed) .scramble-screen-stage { max-height: 100%; justify-content: flex-start; gap: clamp(6px, 1vh, 12px); overflow-y: auto; }
+.scramble-screen-shell:is(.is-winners, .is-completed):has(.scramble-screen-event) { align-items: start; }
+.scramble-screen-shell:is(.is-winners, .is-completed) .scramble-screen-stage:has(.scramble-screen-event) { height: 100%; min-height: 0; justify-content: space-between; }
+.scramble-screen-answer { width: 100%; flex-shrink: 0; }
 .scramble-screen-shell:is(.is-winners, .is-completed) .scramble-screen-title, .scramble-screen-shell:is(.is-winners, .is-completed) .scramble-screen-subtitle, .scramble-screen-shell:is(.is-winners, .is-completed) .scramble-screen-reveal { flex-shrink: 0; }
 .scramble-screen-shell:is(.is-winners, .is-completed) .scramble-screen-reveal { max-width: 100%; }
-.scramble-screen-shell:is(.is-winners, .is-completed) .raffle-screen-winners { flex: 0 1 auto; max-height: 38vh; }
+.scramble-screen-shell:is(.is-winners, .is-completed) .raffle-screen-winners { flex: 0 1 auto; max-height: 100%; }
+.scramble-screen-shell .raffle-screen-winner-list strong { font-size: 100px; }
+.scramble-screen-shell .raffle-screen-winner-list .raffle-screen-ticket { font-size: 50px; }
+.scramble-screen-shell.has-three-winners .scramble-screen-stage { height: 100%; min-height: 0; gap: clamp(4px, .7vh, 8px); }
+.scramble-screen-shell.has-three-winners .scramble-screen-event .scramble-screen-title { font-size: min(120px, 14vh); }
+.scramble-screen-shell.has-three-winners .scramble-screen-reveal .scramble-word { margin: 4px 0; }
+.scramble-screen-shell.has-three-winners .scramble-screen-reveal .scramble-word-letter { font-size: min(100px, 9.3vh); }
+.scramble-screen-shell.has-three-winners .raffle-screen-winners { flex: 0 1 auto; max-height: none; }
+.scramble-screen-shell.has-three-winners .raffle-screen-winners h2 { margin-bottom: 4px; }
+.scramble-screen-shell.has-three-winners .raffle-screen-winner-list { gap: 6px; }
+.scramble-screen-shell.has-three-winners .raffle-screen-winner-list li { padding: 6px 16px; }
+.scramble-screen-shell.has-three-winners .raffle-screen-winner-list strong { font-size: min(100px, 9.3vh); }
+.scramble-screen-shell.has-three-winners .raffle-screen-winner-list .raffle-screen-ticket { font-size: min(50px, 4.65vh); }
 .scramble-screen-reveal .scramble-word-letter:nth-child(2n) { animation-delay: .08s; }
 .scramble-screen-reveal .scramble-word-letter:nth-child(3n) { animation-delay: .16s; }
 @keyframes scramble-reveal-pop { from { opacity: 0; transform: translateY(22px) scale(.72); } to { opacity: 1; transform: none; } }

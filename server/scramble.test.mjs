@@ -8,6 +8,31 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
+import { createDatabase } from './db.mjs'
+
+test('existing scramble games gain display image columns without losing data', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'roomvote-scramble-migration-'))
+  const filename = path.join(directory, 'test.sqlite')
+  const legacy = new DatabaseSync(filename)
+  legacy.exec(`
+    CREATE TABLE scramble_games (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, answer TEXT NOT NULL, scrambled TEXT NOT NULL,
+      status TEXT NOT NULL, answer_revealed_at TEXT, logo_mime_type TEXT, logo BLOB,
+      created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    INSERT INTO scramble_games VALUES ('old', 'Old game', 'APPLE', 'PAPLE', 'draft', NULL, NULL, NULL, 'host', '2026-01-01', '2026-01-01');
+  `)
+  legacy.close()
+  const database = await createDatabase({ driver: 'sqlite', filename })
+  t.after(async () => { await database.close(); await rm(directory, { recursive: true, force: true }) })
+  await database.initializeSchema()
+  await database.initializeSchema()
+  const game = await database.prepare('SELECT title, display_image_1 AS image1, display_image_2 AS image2 FROM scramble_games WHERE id = ?').get('old')
+  assert.equal(game.title, 'Old game')
+  assert.equal(game.image1, null)
+  assert.equal(game.image2, null)
+})
 
 test('announcing winners reveals the answer together with only announced winners', { timeout: 30000 }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'roomvote-scramble-test-'))
@@ -59,12 +84,25 @@ test('announcing winners reveals the answer together with only announced winners
   form.append('answer', 'APPLE')
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aAX8AAAAASUVORK5CYII=', 'base64')
   form.append('displayLogo', new Blob([png], { type: 'image/png' }), 'display.png')
+  form.append('logo', new Blob([png], { type: 'image/png' }), 'qr.png')
+  form.append('displayImage1', new Blob([png], { type: 'image/png' }), 'left.png')
+  form.append('displayImage2', new Blob([png], { type: 'image/png' }), 'right.png')
   const created = await fetch(`${base}/api/scrambles`, { method: 'POST', headers: { Cookie: cookie }, body: form })
   assert.equal(created.status, 201)
   const game = await created.json()
   const url = `/api/scrambles/${game.id}`
-  assert.equal(game.logoUrl, null)
+  assert.equal(game.logoUrl, `${url}/logo?version=1`)
   assert.equal(game.displayLogoUrl, `${url}/display-logo?version=1`)
+  assert.equal(game.displayImage1Url, `${url}/display-image/1?version=1`)
+  assert.equal(game.displayImage2Url, `${url}/display-image/2?version=1`)
+  for (const imageUrl of [game.displayImage1Url, game.displayImage2Url]) {
+    const image = await fetch(`${base}${imageUrl}`)
+    assert.equal(image.status, 200)
+    assert.equal(image.headers.get('content-type'), 'image/png')
+    assert.equal(image.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), png)
+  }
+  assert.equal((await fetch(`${base}${url}/display-image/3`)).status, 404)
   const logo = await fetch(`${base}${game.displayLogoUrl}`)
   assert.equal(logo.status, 200)
   assert.equal(logo.headers.get('content-type'), 'image/png')
@@ -91,6 +129,8 @@ test('announcing winners reveals the answer together with only announced winners
   assert.equal((await post(`${url}/winners/confirm`)).status, 200)
   const before = await display()
   assert.equal(before.game.displayLogoUrl, game.displayLogoUrl)
+  assert.equal(before.game.displayImage1Url, game.displayImage1Url)
+  assert.equal(before.game.displayImage2Url, game.displayImage2Url)
   assert.equal(before.game.revealedAnswer, null)
   assert.deepEqual(before.announcedWinners, [])
   assert.equal((await post(`${url}/winners/${first.id}/announce`, {}, false)).status, 401)
@@ -107,6 +147,8 @@ test('announcing winners reveals the answer together with only announced winners
   assert.equal((await display()).game.revealedAnswer, 'APPLE')
   assert.equal((await post(`${url}/reset`)).status, 200)
   const reset = await display()
+  assert.equal(reset.game.displayImage1Url, game.displayImage1Url)
+  assert.equal(reset.game.displayImage2Url, game.displayImage2Url)
   assert.equal(reset.game.revealedAnswer, null)
   assert.deepEqual(reset.announcedWinners, [])
 
@@ -125,10 +167,23 @@ test('announcing winners reveals the answer together with only announced winners
   invalidForm.append('answer', 'APPLE')
   invalidForm.append('displayLogo', new Blob(['not an image'], { type: 'image/png' }), 'invalid.png')
   assert.equal((await fetch(`${base}/api/scrambles`, { method: 'POST', headers: { Cookie: cookie }, body: invalidForm })).status, 400)
+  for (const field of ['displayImage1', 'displayImage2']) {
+    const invalid = new FormData()
+    invalid.append('title', 'Invalid display image')
+    invalid.append('answer', 'APPLE')
+    invalid.append(field, new Blob(['not an image'], { type: 'image/png' }), 'invalid.png')
+    const response = await fetch(`${base}/api/scrambles`, { method: 'POST', headers: { Cookie: cookie }, body: invalid })
+    assert.equal(response.status, 400)
+    assert.match((await response.json()).error, /not a valid/)
+  }
   const noLogo = new FormData()
   noLogo.append('title', 'No logo')
   noLogo.append('answer', 'APPLE')
   const legacy = await fetch(`${base}/api/scrambles`, { method: 'POST', headers: { Cookie: cookie }, body: noLogo })
   assert.equal(legacy.status, 201)
-  assert.equal((await legacy.json()).displayLogoUrl, null)
+  const noImages = await legacy.json()
+  assert.equal(noImages.displayLogoUrl, null)
+  assert.equal(noImages.displayImage1Url, null)
+  assert.equal(noImages.displayImage2Url, null)
+  assert.equal((await fetch(`${base}/api/scrambles/${noImages.id}/display-image/1`)).status, 404)
 })

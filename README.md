@@ -19,19 +19,19 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL printed in the terminal, normally `http://localhost:5173`, and sign in to the activity dashboard. Choose **Q&A** to create a question with predefined answers the audience can select; the host marks exactly one answer as correct before creating it. See [Q&A game](#qa-game) for the full flow. A Q&A question can be text only, or an uploaded image (JPEG, PNG, or WebP, 5 MB max) with an optional caption. Choose **QR Voting** to manage regular polls. Both use the poll dashboard and live QR voting flow. Choose **Vanishing Tic-Tac-Toe** to open game room management at `/game`, or **Selfie Cam** to create a guest photo-upload QR and moderate full-screen submissions at `/selfie`. Choose **QR Word Scramble** to run an audience word game with QR registration and secure winner selection at `/scramble`; see [QR Word Scramble](#qr-word-scramble). The voting management dashboard is also available at `/voting`. The API runs on port `4179`; the MariaDB tables are created on first start from `db/mariadb-schema.sql`.
+Open the URL printed in the terminal, normally `http://localhost:3000`, and sign in to the activity dashboard. Choose **Q&A** to create a question with predefined answers the audience can select; the host marks exactly one answer as correct before creating it. See [Q&A game](#qa-game) for the full flow. A Q&A question can be text only, or an uploaded image (JPEG, PNG, or WebP, 5 MB max) with an optional caption. Choose **QR Voting** to manage regular polls. Both use the poll dashboard and live QR voting flow. Choose **Vanishing Tic-Tac-Toe** to open game room management at `/game`, or **Selfie Cam** to create a guest photo-upload QR and moderate full-screen submissions at `/selfie`. Choose **QR Word Scramble** to run an audience word game with QR registration and secure winner selection at `/scramble`; see [QR Word Scramble](#qr-word-scramble). The voting management dashboard is also available at `/voting`. The development server serves both the app and API; MariaDB tables are created on first start from `db/mariadb-schema.sql`.
 
 ### Local testing with SQLite
 
-To run a local test instance without MariaDB, use Node.js 22.13 or newer and select the opt-in SQLite driver in PowerShell:
+To run a local test instance without MariaDB, use Node.js 22.13 or newer and select the SQLite driver in PowerShell:
 
 ```powershell
 $env:DB_DRIVER = 'sqlite'
-$env:SQLITE_PATH = 'data/roomvote-local.sqlite'
-npm run dev
+$env:SQLITE_PATH = 'data\roomvote-local.sqlite'
+npm.cmd run dev
 ```
 
-If `SQLITE_PATH` is omitted, the database defaults to `data/roomvote-local.sqlite`. It is separate from the MariaDB database and from the older SQLite migration source. `DB_DRIVER` is not set by default, so production continues to use MariaDB.
+If `SQLITE_PATH` is omitted, the database defaults to `data/roomvote-local.sqlite`. It is separate from the MariaDB database and from the older SQLite migration source. The app also falls back to local SQLite when MariaDB credentials are not configured.
 
 ## Admin access
 
@@ -93,7 +93,7 @@ When creating a poll, optionally upload a JPEG, PNG, or WebP logo (up to 5 MB). 
 
 Choose **QR Word Scramble** on the activity dashboard (`/scramble`) to run an audience word game. The host creates a game with a title and a correct word or phrase; the server automatically generates a scrambled version (preserving every letter and spaces between words) that the host can reshuffle or edit manually before the game starts. The correct answer stays private on the server and is never included in public API responses until the host announces a winner.
 
-Before creating a game, optionally upload an open-display logo or select one from the image bank. It appears above the event name after the game starts and is separate from the optional QR logo. The registration screen shows only the QR code and scan prompt. Display logos accept JPEG, PNG, and WebP files up to 5 MB. Restart the updated API to add the display-logo columns to existing databases.
+Before creating a game, optionally upload a QR logo or select one from the image bank. You can also upload two optional display images; they appear to the left and right of the event name at the top of the winner and completion displays. The registration screen shows only the QR code and scan prompt. Images accept JPEG, PNG, and WebP files up to 5 MB each. Existing games retain previously uploaded display logos. Restart the updated API to add the display-image columns to existing databases.
 
 **Audience flow** (phone, via the one QR code that stays valid for the whole event): scan → register once with a name and ticket number (ticket numbers are unique per game, compared case-insensitively and ignoring spaces) → when the host starts the game, unscramble the word and submit exactly one answer → the QR Word Scramble ad video plays full-screen (see [Video ads](#video-ads)) → a **THANK YOU FOR PARTICIPATING!** screen shows **CORRECT** (entered into the eligible winner pool) or **INCORRECT** (not eligible). Answers are validated on the server: case-insensitive, trimmed, and whitespace-normalized. Duplicate registrations and repeat submissions are rejected by the backend, not just the UI.
 
@@ -122,7 +122,7 @@ A Q&A is a quiz: one question, up to 8 answers, exactly one correct. Any partici
 ### Installation and deployment
 
 1. Install Node.js (24 recommended), create a MariaDB 10.5+ database and user, and run `npm install`.
-2. Development: `npm run dev` (Vite on `5173`, API on `4179`). Production: `npm run build` then `npm start`, which serves the app and API on `PORT` (default `4179`).
+2. Development: `npm run dev` serves Vite and the API together. Production: `npm run build` then `npm start`. Both use `PORT` (default `3000`).
 3. Open the site and create the first admin account on the setup screen. Admins can add hosts under **Manage users**.
 4. Upload the Q&A advertisement (MP4 recommended) under **Videos**.
 5. Put the app behind HTTPS (camera scanning and secure cookies need it). If a reverse proxy terminates TLS, set `TRUST_PROXY_HOPS`. Disable response buffering for `/api/polls/*/monitor/stream` (nginx: `proxy_buffering off`).

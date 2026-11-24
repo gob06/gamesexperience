@@ -9,6 +9,7 @@ import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 import { DisplayWinners } from './DisplayWinners'
+import { DisplayImagePicker } from './DisplayImagePicker'
 
 type ScrambleStatus = 'draft' | 'active' | 'paused' | 'closed' | 'completed'
 
@@ -28,6 +29,8 @@ type PublicScramble = {
   status: ScrambleStatus
   logoUrl: string | null
   displayLogoUrl: string | null
+  displayImage1Url: string | null
+  displayImage2Url: string | null
   scrambled: string | null
   revealedAnswer: string | null
   registrationOpen: boolean
@@ -40,6 +43,8 @@ type HostScramble = {
   status: ScrambleStatus
   logoUrl: string | null
   displayLogoUrl: string | null
+  displayImage1Url: string | null
+  displayImage2Url: string | null
   answer: string
   scrambled: string
   answerRevealed: boolean
@@ -93,6 +98,16 @@ type DisplayData = {
   game: PublicScramble
   counts: { registrations: number; answered: number }
   announcedWinners: { id: string; participantName: string; ticketNumber: string; announcedAt: string }[]
+}
+
+function WinnerDisplayHeading({ game }: { game: PublicScramble }) {
+  return (
+    <header className="raffle-screen-event scramble-screen-event">
+      {game.displayImage1Url && <img className="raffle-screen-side-image is-left" src={game.displayImage1Url} alt="" />}
+      <h1 className="scramble-screen-title">{game.title}</h1>
+      {game.displayImage2Url && <img className="raffle-screen-side-image is-right" src={game.displayImage2Url} alt="" />}
+    </header>
+  )
 }
 
 type ScrambleTab = 'qr' | 'game' | 'participants' | 'winners'
@@ -419,7 +434,7 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
     : 'word'
 
   return (
-    <main className={screen === 'intro' ? 'raffle-screen-shell' : `scramble-screen-shell is-${screen}${game.displayLogoUrl ? ' has-display-logo' : ''}`}>
+    <main className={screen === 'intro' ? 'raffle-screen-shell' : `scramble-screen-shell is-${screen}${game.displayLogoUrl ? ' has-display-logo' : ''}${announcedWinners.length === 3 ? ' has-three-winners' : ''}`}>
       {screen === 'intro' && (
         <section className="raffle-screen-qr-only" aria-label="Word scramble registration QR code">
           {shareUrl ? <ScrambleQrCode value={shareUrl} logoUrl={eventLogoUrl} size={1024} label={`QR code to join ${game.title}`} /> : <span>Loading QR…</span>}
@@ -454,18 +469,17 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
       )}
       {screen === 'winners' && (
         <section className="scramble-screen-stage" aria-live="polite">
-          {game.displayLogoUrl && <img className="scramble-screen-logo" src={game.displayLogoUrl} alt="Event logo" />}
-          <h1 className="scramble-screen-title">{game.title}</h1>
-          {game.revealedAnswer && <><p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p><div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer} /></div></>}
+          <WinnerDisplayHeading game={game} />
+          {game.revealedAnswer && <div className="scramble-screen-answer"><p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p><div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer} /></div></div>}
           <DisplayWinners winners={announcedWinners} />
         </section>
       )}
       {screen === 'completed' && (
         <section className="scramble-screen-stage" aria-live="polite">
-          {game.displayLogoUrl && <img className="scramble-screen-logo" src={game.displayLogoUrl} alt="Event logo" />}
-          <h1 className="scramble-screen-title">{game.title}</h1>
+          {!announcedWinners.length && game.displayLogoUrl && <img className="scramble-screen-logo" src={game.displayLogoUrl} alt="Event logo" />}
+          {announcedWinners.length ? <WinnerDisplayHeading game={game} /> : <h1 className="scramble-screen-title">{game.title}</h1>}
           <p className="scramble-screen-subtitle">THANK YOU FOR PLAYING!</p>
-          {game.revealedAnswer && <><p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p><div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer} /></div></>}
+          {game.revealedAnswer && <div className="scramble-screen-answer"><p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p><div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer} /></div></div>}
           {announcedWinners.length > 0 && (
             <DisplayWinners winners={announcedWinners} />
           )}
@@ -487,9 +501,8 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState('')
   const logoInputRef = useRef<HTMLInputElement>(null)
-  const [displayLogoFile, setDisplayLogoFile] = useState<File | null>(null)
-  const [displayLogoPreview, setDisplayLogoPreview] = useState('')
-  const displayLogoInputRef = useRef<HTMLInputElement>(null)
+  const [displayImage1, setDisplayImage1] = useState<File | null>(null)
+  const [displayImage2, setDisplayImage2] = useState<File | null>(null)
 
   const [wordAnswer, setWordAnswer] = useState('')
   const [wordScrambled, setWordScrambled] = useState('')
@@ -520,11 +533,6 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
     if (!logoPreview) return
     return () => URL.revokeObjectURL(logoPreview)
   }, [logoPreview])
-
-  useEffect(() => {
-    if (!displayLogoPreview) return
-    return () => URL.revokeObjectURL(displayLogoPreview)
-  }, [displayLogoPreview])
 
   useEffect(() => {
     let active = true
@@ -594,7 +602,8 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
     body.append('title', title.trim())
     body.append('answer', answerDraft.trim())
     if (logoFile) body.append('logo', logoFile)
-    if (displayLogoFile) body.append('displayLogo', displayLogoFile)
+    if (displayImage1) body.append('displayImage1', displayImage1)
+    if (displayImage2) body.append('displayImage2', displayImage2)
     try {
       const created = await requestJson<HostScramble>('/api/scrambles', { method: 'POST', body })
       setGames((current) => [{ id: created.id, title: created.title, status: created.status, createdAt: created.createdAt, logoUrl: created.logoUrl, entryCount: 0, winnerCount: 0 }, ...current])
@@ -603,8 +612,8 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
       setAnswerDraft('')
       setLogoFile(null)
       setLogoPreview('')
-      setDisplayLogoFile(null)
-      setDisplayLogoPreview('')
+      setDisplayImage1(null)
+      setDisplayImage2(null)
       if (logoInputRef.current) logoInputRef.current.value = ''
       setTab('game')
       setNotice('Word scramble created. Preview the scrambled word, then start the game.')
@@ -657,33 +666,6 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
       setLogoPreview(URL.createObjectURL(file))
     } catch {
       setError('Could not load that image from the image bank.')
-    }
-  }
-
-  function selectDisplayLogo(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
-    if (!file) return
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return setError('Choose a JPEG, PNG, or WebP display logo.')
-    if (file.size > 5 * 1024 * 1024) return setError('Display logo must be 5 MB or smaller.')
-    setError('')
-    setDisplayLogoFile(file)
-    setDisplayLogoPreview(URL.createObjectURL(file))
-    void saveLogo(file)
-  }
-
-  async function useSavedDisplayLogo(logo: SavedLogo) {
-    try {
-      const response = await fetch(logo.dataUrl, { credentials: 'same-origin' })
-      if (!response.ok) throw new Error('Could not load image.')
-      const blob = await response.blob()
-      if (!['image/jpeg', 'image/png', 'image/webp'].includes(blob.type) || !blob.size || blob.size > 5 * 1024 * 1024) throw new Error('Invalid image.')
-      const file = new File([blob], logo.name, { type: blob.type })
-      setError('')
-      setDisplayLogoFile(file)
-      setDisplayLogoPreview(URL.createObjectURL(file))
-    } catch {
-      setError('Could not load the display logo from the image bank.')
     }
   }
 
@@ -839,15 +821,9 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                 {logoFile && <button className="icon-button" type="button" onClick={() => { setLogoFile(null); setLogoPreview(''); if (logoInputRef.current) logoInputRef.current.value = '' }} aria-label="Remove logo"><X size={15} /></button>}
               </div>
               <SavedLogoPicker onSelect={(logo) => void useSavedLogo(logo)} />
-              <input ref={displayLogoInputRef} className="raffle-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={selectDisplayLogo} aria-label="Upload open display logo" />
-              <div className="raffle-logo-row">
-                <span className="raffle-logo-preview">{displayLogoPreview ? <img src={displayLogoPreview} alt="Display logo preview" /> : <ImagePlus size={19} />}</span>
-                <span className="raffle-logo-name">{displayLogoFile?.name || 'Open display logo · optional'}</span>
-                <button className="button button-secondary raffle-upload-button" type="button" onClick={() => displayLogoInputRef.current?.click()}>{displayLogoFile ? 'Change' : 'Upload'}</button>
-                {displayLogoFile && <button className="icon-button" type="button" onClick={() => { setDisplayLogoFile(null); setDisplayLogoPreview('') }} aria-label="Remove display logo"><X size={15} /></button>}
-              </div>
-              <p className="raffle-help">Shown above the event name on the open display. JPEG, PNG, or WebP, up to 5 MB.</p>
-              <SavedLogoPicker label="Image bank (display logo)" onSelect={(logo) => void useSavedDisplayLogo(logo)} />
+              <DisplayImagePicker label="Display image 1" file={displayImage1} onChange={setDisplayImage1} onError={setError} />
+              <DisplayImagePicker label="Display image 2" file={displayImage2} onChange={setDisplayImage2} onError={setError} />
+              <p className="raffle-help">Optional images appear on either side of the event name when winners are displayed. JPEG, PNG, or WebP, up to 5 MB each.</p>
               <button className="button button-primary raffle-submit" type="submit" disabled={creating}>{creating ? 'Creating…' : 'Create word scramble'} <ArrowUpRight size={16} /></button>
             </form>
             <section className="raffle-session-list">
