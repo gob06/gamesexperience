@@ -3,6 +3,7 @@ import QRCode from 'qrcode'
 import { Smartphone } from 'lucide-react'
 import { getSelfieJoinUrl } from './SelfieCam'
 import { initialCarouselState, selfieCarousel } from './selfieCarousel'
+import { readSelfieJson } from './selfieResponse'
 
 type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string; approvedAt?: string | null }
 type QrSession = { id: string; joinToken: string; paused: boolean }
@@ -70,7 +71,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
           cache: 'no-store',
           headers: displayToken ? { 'X-Selfie-Display-Token': displayToken } : undefined,
         })
-        const result = await response.json() as { submissions?: Submission[]; closed?: boolean; paused?: boolean; rotationSeconds?: number; qrSession?: QrSession | null; error?: string }
+        const result = await readSelfieJson<{ submissions?: Submission[]; closed?: boolean; paused?: boolean; rotationSeconds?: number; qrSession?: QrSession | null; error?: string }>(response, 'Could not load photos')
         if (!active) return
         if (response.status === 404 || response.status === 410) {
           dispatch({ type: 'reset' })

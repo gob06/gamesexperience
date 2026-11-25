@@ -5,6 +5,7 @@ import { ThemeBrand } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
+import { readSelfieJson } from './selfieResponse'
 
 function SantaLoadError({ onError }: { onError: () => void }) {
   const errorCallback = useRef(onError)
@@ -49,6 +50,8 @@ export default function SelfieCam() {
   const [joinUrl, setJoinUrl] = useState('')
   const [qrLogoUrl, setQrLogoUrl] = useState('')
   const [submissions, setSubmissions] = useState<SelfieSubmission[]>([])
+  const [submissionsError, setSubmissionsError] = useState('')
+  const submissionRequest = useRef(0)
   const [displaySubmission, setDisplaySubmission] = useState<SelfieSubmission | null>(null)
   const [fallbackFullscreen, setFallbackFullscreen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -66,7 +69,7 @@ export default function SelfieCam() {
     async function refresh() {
       try {
         const response = await fetch('/api/selfie/sessions', { cache: 'no-store' })
-        const result = await response.json() as { sessions?: RecentSession[]; error?: string }
+        const result = await readSelfieJson<{ sessions?: RecentSession[]; error?: string }>(response, 'Could not load recent selfie sessions')
         if (!response.ok || !result.sessions) throw new Error(result.error || 'Could not load recent selfie sessions.')
         if (active) { setRecentSessions(result.sessions); setSessionsError('') }
       } catch (caught) {
@@ -85,7 +88,7 @@ export default function SelfieCam() {
     setNotice('')
     try {
       const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(id)}/links`, { method: 'POST' })
-      const result = await response.json() as SelfieSession & { error?: string }
+      const result = await readSelfieJson<SelfieSession & { error?: string }>(response, 'Could not open this selfie session')
       if (!response.ok || !result.id || !result.joinToken || !result.displayToken) throw new Error(result.error || 'Could not open this selfie session.')
       const url = await getSelfieJoinUrl(result.joinToken)
       selectedSessionId.current = result.id
@@ -95,6 +98,7 @@ export default function SelfieCam() {
       setJoinUrl(url)
       setPaused(result.paused)
       setSubmissions([])
+      setSubmissionsError('')
       setDisplaySubmission(null)
       setQrLogoUrl(localStorage.getItem(`selfie-qr-logo:${result.id}`) || '')
     } catch (caught) {
@@ -177,7 +181,7 @@ export default function SelfieCam() {
     setNotice('')
     try {
       const response = await fetch('/api/selfie/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ santaEnabled }) })
-      const result = await response.json() as SelfieSession & { error?: string }
+      const result = await readSelfieJson<SelfieSession & { error?: string }>(response, 'Could not create a selfie session')
       if (!response.ok || !result.id || !result.joinToken || !result.displayToken) throw new Error(result.error || 'Could not create a selfie session. Update and restart the server, then try again.')
       if (bannerFile) {
         const form = new FormData()
@@ -206,6 +210,7 @@ export default function SelfieCam() {
       setPaused(false)
       setJoinUrl(url)
       setSubmissions([])
+      setSubmissionsError('')
       setDisplaySubmission(null)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not create a selfie session.')
@@ -215,26 +220,34 @@ export default function SelfieCam() {
   }
 
   async function refreshSubmissions(sessionId: string) {
+    const requestId = ++submissionRequest.current
     try {
       const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(sessionId)}/submissions`)
-      const result = await response.json() as { submissions?: SelfieSubmission[]; closed?: boolean; closedAt?: string | null; paused?: boolean; rotationSeconds?: number; error?: string }
-      if (selectedSessionId.current !== sessionId) return
+      const result = await readSelfieJson<{ submissions?: SelfieSubmission[]; closed?: boolean; closedAt?: string | null; paused?: boolean; rotationSeconds?: number; error?: string }>(response, 'Could not load selfie submissions')
+      if (selectedSessionId.current !== sessionId || requestId !== submissionRequest.current) return
       if (!response.ok || !result.submissions) throw new Error(result.error || 'Could not load selfie submissions.')
+      setSubmissionsError('')
       setSubmissions(result.submissions)
       const approvedIds = new Set(result.submissions.filter((submission) => submission.status === 'approved').map((submission) => submission.id))
       setSelectedPhotos((current) => current.filter((id) => approvedIds.has(id)))
       setPaused(Boolean(result.paused))
       setSession((current) => current?.id === sessionId ? { ...current, closedAt: result.closedAt || null, rotationSeconds: result.rotationSeconds ?? current.rotationSeconds } : current)
     } catch (caught) {
-      if (selectedSessionId.current === sessionId) setError(caught instanceof Error ? caught.message : 'Could not refresh selfie submissions.')
+      if (selectedSessionId.current === sessionId && requestId === submissionRequest.current) setSubmissionsError(caught instanceof Error ? caught.message : 'Could not refresh selfie submissions.')
     }
   }
 
   useEffect(() => {
     if (!session) return
-    void refreshSubmissions(session.id)
-    const timer = window.setInterval(() => void refreshSubmissions(session.id), 2000)
-    return () => window.clearInterval(timer)
+    let active = true
+    let timer: number
+    const sessionId = session.id
+    async function refresh() {
+      await refreshSubmissions(sessionId)
+      if (active) timer = window.setTimeout(() => void refresh(), 2000)
+    }
+    void refresh()
+    return () => { active = false; window.clearTimeout(timer) }
   }, [session?.id])
 
   useEffect(() => {
@@ -295,7 +308,7 @@ export default function SelfieCam() {
     try {
       const endpoint = `/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(submission.id)}`
       const response = await fetch(action === 'approve' ? `${endpoint}/approve` : endpoint, { method: action === 'approve' ? 'POST' : 'DELETE' })
-      const result = response.status === 204 ? null : await response.json() as { error?: string }
+      const result = response.status === 204 ? null : await readSelfieJson<{ error?: string }>(response, `Could not ${action} this photo`)
       if (!response.ok) throw new Error(result?.error || `Could not ${action} this photo.`)
       if (action === 'approve') {
         setNotice('Photo approved. It can now be shown on the big screen.')
@@ -323,7 +336,7 @@ export default function SelfieCam() {
       const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(id)}/rotation`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seconds }),
       })
-      const result = await response.json() as { rotationSeconds?: number; error?: string }
+      const result = await readSelfieJson<{ rotationSeconds?: number; error?: string }>(response, 'Could not save rotation duration')
       if (!response.ok || typeof result.rotationSeconds !== 'number') throw new Error(result.error || 'Could not save rotation duration.')
       if (selectedSessionId.current === id) {
         const rotationSeconds = result.rotationSeconds
@@ -352,7 +365,7 @@ export default function SelfieCam() {
         const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(id)}/submissions/delete-approved`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: batch }),
         })
-        const result = await response.json() as { deleted?: number; error?: string }
+        const result = await readSelfieJson<{ deleted?: number; error?: string }>(response, 'Could not delete selected photos')
         if (!response.ok || typeof result.deleted !== 'number') throw new Error(result.error || 'Could not delete selected photos.')
         deleted += result.deleted
         processed += batch.length
@@ -404,7 +417,7 @@ export default function SelfieCam() {
     if (!session || !window.confirm('End this selfie session? Participants will no longer be able to submit photos.')) return
     try {
       const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(session.id)}/close`, { method: 'POST' })
-      const result = response.status === 204 ? null : await response.json() as { error?: string }
+      const result = response.status === 204 ? null : await readSelfieJson<{ error?: string }>(response, 'Could not end the selfie session')
       if (!response.ok) throw new Error(result?.error || 'Could not end the selfie session.')
       await refreshSubmissions(session.id)
       setNotice('Selfie session ended. Photos remain playable; the live screen uses the newest ongoing session from the same host for its QR.')
@@ -421,7 +434,7 @@ export default function SelfieCam() {
     setNotice('')
     try {
       const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      const result = response.status === 204 ? null : await response.json() as { error?: string }
+      const result = response.status === 204 ? null : await readSelfieJson<{ error?: string }>(response, 'Could not delete the selfie session')
       if (!response.ok) throw new Error(result?.error || 'Could not delete the selfie session.')
       selectedSessionId.current = null
       setSession(null)
@@ -533,11 +546,12 @@ export default function SelfieCam() {
                 <span className="selfie-expiry">{session.closedAt ? `Uploads ended ${new Date(session.closedAt).toLocaleString()}` : 'No time limit - uploads stay open until you end the session.'}</span>
               </div>
               <div className="selfie-review-heading"><h3>Photo review</h3><span>{pendingSubmissions.length} waiting · {approvedSubmissions.length} approved</span></div>
+              {submissionsError && <p className="selfie-error" role="alert">{submissionsError}</p>}
               {approvedSubmissions.length > 0 && <div className="selfie-batch-actions">
                 <label><input type="checkbox" disabled={deletingPhotos} checked={approvedSubmissions.every((photo) => selectedPhotos.includes(photo.id))} onChange={(event) => setSelectedPhotos(event.currentTarget.checked ? approvedSubmissions.map((photo) => photo.id) : [])} /> Select all approved</label>
                 <button className="button button-secondary" type="button" disabled={deletingPhotos || !selectedPhotos.length} onClick={() => void deleteSelectedPhotos()}><Trash2 size={15} /> {deletingPhotos ? 'Deleting...' : `Delete selected (${selectedPhotos.length})`}</button>
               </div>}
-              {submissions.length === 0 ? <p className="selfie-empty-submissions">Waiting for guests to submit photos…</p> : (
+              {submissions.length === 0 ? !submissionsError && <p className="selfie-empty-submissions">Waiting for guests to submit photos…</p> : (
                 <div className="selfie-submission-list">
                   {submissions.map((submission) => (
                     <article className="selfie-submission" key={submission.id}>
@@ -545,7 +559,7 @@ export default function SelfieCam() {
                         const checked = event.currentTarget.checked
                         setSelectedPhotos((current) => checked ? [...current, submission.id] : current.filter((id) => id !== submission.id))
                       }} />}
-                      <img className="audience-submitted-image" src={`/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(submission.id)}/image`} alt={submission.status === 'approved' ? 'Approved guest photo' : 'Photo awaiting review'} />
+                      <img className="audience-submitted-image" src={`/api/selfie/sessions/${encodeURIComponent(session.id)}/submissions/${encodeURIComponent(submission.id)}/image`} alt={submission.status === 'approved' ? 'Approved guest photo' : 'Photo awaiting review'} loading="lazy" decoding="async" onError={() => setError('A review photo could not be loaded. It may have been removed or the server may be unavailable.')} />
                       <div className="selfie-submission-copy"><strong>{submission.status === 'approved' ? 'Approved photo' : 'Needs review'}</strong><span>{new Date(submission.createdAt).toLocaleTimeString()}</span></div>
                       {submission.status === 'pending' ? (
                         <div className="selfie-submission-actions">
@@ -734,7 +748,7 @@ export function SelfieParticipant({ token }: { token: string }) {
       const data = new FormData()
       data.append('image', photo)
       const response = await fetch(`/api/selfie/join/${encodeURIComponent(token)}`, { method: 'POST', body: data })
-      const result = await response.json() as { error?: string }
+      const result = await readSelfieJson<{ error?: string }>(response, 'Could not send your photo to the host')
       if (!response.ok) throw new Error(result.error || 'Could not send your photo to the host.')
       setSubmitted(true)
       setShowAd(true)

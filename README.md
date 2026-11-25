@@ -69,6 +69,8 @@ The **Recent sessions** list on `/selfie` shows newest sessions first, including
 
 In **Photo review**, select individual approved photos or **Select all approved**, then choose **Delete selected** and confirm to permanently delete them. Pending photos are not included. Set **Photo rotation** to a whole number from 2 to 300 seconds and save it to change how long photos stay on that session's live screen and OBS display. The default is 5 seconds; the setting is saved with the session, including ended sessions, and updates existing displays without changing their links. Restart the updated API to add the setting to existing databases.
 
+Photo review loads images as they approach the visible area and waits for each automatic list refresh to finish before starting the next one. If the server or proxy returns an incomplete response, the page reports its HTTP status; check the corresponding production server and proxy logs if the error persists.
+
 There is no photo-count limit per selfie session. Each photo must still pass image validation and remain within the 5 MB size limit. Host approval, pause, and end-session controls still apply. Available database storage limits total capacity.
 
 Hosts/admins can choose **Preview full screen** on a pending photo to inspect it before approval. This private preview does not approve the photo or show it on the live/OBS display. Exit full screen to return to the review queue and approve or reject it.

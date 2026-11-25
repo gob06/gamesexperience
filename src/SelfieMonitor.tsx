@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, LogOut } from 'lucide-react'
 import { ThemeBrand } from './theme'
+import { readSelfieJson } from './selfieResponse'
 
 type Photo = { id: string; status: 'pending' | 'approved'; createdAt: string }
 type Session = { id: string; host: string; createdAt: string; closedAt: string | null; paused: boolean; santaEnabled: boolean; photos: Photo[] }
@@ -18,7 +19,7 @@ export default function SelfieMonitor({ username, onLogout }: { username: string
     async function refresh() {
       try {
         const response = await fetch('/api/admin/selfie/sessions', { cache: 'no-store' })
-        const result = await response.json() as { sessions?: Session[]; error?: string }
+        const result = await readSelfieJson<{ sessions?: Session[]; error?: string }>(response, 'Could not load selfie sessions')
         if (!response.ok || !result.sessions) throw new Error(result.error || 'Could not load selfie sessions.')
         if (active) {
           setSessions(result.sessions)
