@@ -1911,9 +1911,20 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-winner-rank { display: inline-flex; align-items: center; gap: 8px; color: #00d9ff; font-size: clamp(20px, 2.5vw, 36px); }
 .raffle-screen-winner-rank svg { width: 1em; height: 1em; flex: 0 0 auto; }
 .raffle-screen-winner-list .raffle-screen-ticket { font-size: clamp(18px, 2.5vw, 36px); text-align: left; }
+.raffle-screen-shell.has-few-winners .raffle-screen-winner-list { flex: 1 1 auto; }
+.raffle-screen-shell.has-few-winners .raffle-screen-winner-list li { flex: 1 0 auto; }
+.raffle-screen-shell.has-few-winners .raffle-screen-winner-list strong { font-size: clamp(24px, 5vw, 8vh); }
+.raffle-screen-shell.has-few-winners .raffle-screen-winner-list .raffle-screen-ticket { font-size: clamp(18px, 3vw, 5vh); }
+.raffle-screen-shell.has-few-winners .raffle-screen-winner-rank { font-size: clamp(20px, 3vw, 5vh); }
+.raffle-screen-shell.has-one-or-two-winners .raffle-screen-winner-list strong { font-size: 100px; }
+.raffle-screen-shell.has-one-or-two-winners .raffle-screen-winner-list .raffle-screen-ticket { font-size: 60px; }
 @media (max-width: 600px) {
   .raffle-screen-winner-list li { grid-template-columns: 40px minmax(0, 1fr); gap: 8px 12px; padding: 16px; }
   .raffle-screen-winner-list .raffle-screen-ticket { grid-column: 2; }
+  .raffle-screen-shell.has-few-winners .raffle-screen-winner-list li { gap: 2px 8px; padding: 6px 12px; }
+}
+@media (max-aspect-ratio: 4/3) {
+  .raffle-screen-shell.has-few-winners .raffle-screen-grid.has-winner { height: calc(100vh - 28px); }
 }
 
 /* === QR Word Scramble === */

@@ -187,7 +187,7 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
   const showQrOnly = Boolean(data && !isDrawing && !hasWinners)
 
   return (
-    <main className={`raffle-screen-shell ${isDrawing ? 'is-drawing' : ''} ${hasWinners ? 'has-winner' : ''}`}>
+    <main className={`raffle-screen-shell ${isDrawing ? 'is-drawing' : ''} ${hasWinners ? 'has-winner' : ''} ${hasWinners && displayWinners.length <= 4 ? 'has-few-winners' : ''} ${hasWinners && displayWinners.length <= 2 ? 'has-one-or-two-winners' : ''}`}>
       {data && error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
       {!data ? (
         <div className="raffle-screen-message">{error || 'Connecting to raffle…'}</div>

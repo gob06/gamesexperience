@@ -41,14 +41,18 @@ async function uploadLogo(file: Blob, name: string) {
   const form = new FormData()
   form.append('name', name)
   form.append('image', png, `${name.replace(/\.[^.]+$/, '') || 'logo'}.png`)
-  await fetch('/api/logo-bank', { method: 'POST', body: form, credentials: 'same-origin' })
+  const response = await fetch('/api/logo-bank', { method: 'POST', body: form, credentials: 'same-origin' })
+  if (!response.ok) throw new Error('Could not save the image to the image bank.')
 }
 
 export async function saveLogo(file: File) {
   try {
     await uploadLogo(file, file.name)
     window.dispatchEvent(new Event('qr-logo-library'))
-  } catch { /* Saving is best-effort. */ }
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function removeSavedLogo(id: string) {
@@ -59,7 +63,9 @@ export async function removeSavedLogo(id: string) {
 }
 
 export async function logoToFile(logo: SavedLogo) {
-  const blob = await (await fetch(logo.dataUrl, { credentials: 'same-origin' })).blob()
+  const response = await fetch(logo.dataUrl, { credentials: 'same-origin' })
+  if (!response.ok) throw new Error('Could not load the image from the image bank.')
+  const blob = await response.blob()
   const base = logo.name.replace(/\.[^.]+$/, '') || 'logo'
   return new File([blob], `${base}.png`, { type: 'image/png' })
 }
