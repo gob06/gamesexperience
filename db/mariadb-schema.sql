@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS polls (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 ALTER TABLE polls ADD COLUMN IF NOT EXISTS join_title VARCHAR(80) NULL;
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(64) NULL;
 
 CREATE TABLE IF NOT EXISTS poll_options (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -145,6 +146,40 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id VARCHAR(64) NOT NULL,
   expires_at VARCHAR(32) NOT NULL,
   INDEX sessions_expiry (expires_at),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin TINYINT(1) NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS account_migrations (
+  id VARCHAR(64) NOT NULL PRIMARY KEY
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS account_theme_settings (
+  user_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  draft_json TEXT NOT NULL,
+  published_json TEXT NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  published_at VARCHAR(32) NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS account_logo_bank (
+  id VARCHAR(64) NOT NULL PRIMARY KEY,
+  owner_user_id VARCHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  content_hash CHAR(64) NOT NULL,
+  image_mime_type VARCHAR(100) NOT NULL,
+  image LONGBLOB NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  UNIQUE INDEX account_logo_owner_hash (owner_user_id, content_hash),
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS account_theme_assets (
+  user_id VARCHAR(64) NOT NULL,
+  asset_id VARCHAR(64) NOT NULL,
+  PRIMARY KEY (user_id, asset_id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 

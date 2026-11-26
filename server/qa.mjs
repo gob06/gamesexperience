@@ -58,7 +58,7 @@ function csvCell(value) {
 }
 
 export function registerQaRoutes({
-  app, database, requireUser, requireAdmin, getCookie, getVotingCookieName, hashSessionToken,
+  app, database, requireUser, requireAdmin, requirePollOwner, getCookie, getVotingCookieName, hashSessionToken,
   selectPoll, selectAdVideo, adVideosDirectory, inTransaction, getPoll, audit,
 }) {
   const events = new EventEmitter()
@@ -312,11 +312,11 @@ export function registerQaRoutes({
     }
   }
 
-  app.get('/api/polls/:id/monitor', requireUser, requireQaPoll, async (request, response) => {
+  app.get('/api/polls/:id/monitor', requireUser, requirePollOwner, requireQaPoll, async (request, response) => {
     response.set('Cache-Control', 'no-store').json(await buildMonitor(request.poll.id))
   })
 
-  app.get('/api/polls/:id/monitor/stream', requireUser, requireQaPoll, (request, response) => {
+  app.get('/api/polls/:id/monitor/stream', requireUser, requirePollOwner, requireQaPoll, (request, response) => {
     const pollId = request.poll.id
     response.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
     response.flushHeaders()
@@ -335,7 +335,7 @@ export function registerQaRoutes({
     })
   })
 
-  app.get('/api/polls/:id/monitor.csv', requireUser, requireQaPoll, async (request, response) => {
+  app.get('/api/polls/:id/monitor.csv', requireUser, requirePollOwner, requireQaPoll, async (request, response) => {
     const filter = ['winners', 'losers'].includes(request.query.filter) ? request.query.filter : 'all'
     const search = typeof request.query.q === 'string' ? request.query.q.trim().toLowerCase().slice(0, 80) : ''
     const rows = (await buildMonitor(request.poll.id)).rows
@@ -350,7 +350,7 @@ export function registerQaRoutes({
       .send(`\uFEFF${lines.join('\r\n')}\r\n`)
   })
 
-  app.patch('/api/polls/:id/submissions/:sessionId/verification', requireAdmin, requireQaPoll, async (request, response) => {
+  app.patch('/api/polls/:id/submissions/:sessionId/verification', requireAdmin, requirePollOwner, requireQaPoll, async (request, response) => {
     const status = request.body?.status
     if (!verificationStatuses.includes(status)) return response.status(400).json({ error: 'Use pending, verified, or rejected.' })
     const result = await database.prepare('UPDATE poll_voters SET verification_status = ?, verified_by = ?, verified_at = ? WHERE poll_id = ? AND voting_session_id = ? AND is_correct = 1')
@@ -361,7 +361,7 @@ export function registerQaRoutes({
     response.json({ status })
   })
 
-  app.patch('/api/polls/:id', requireUser, requireQaPoll, async (request, response) => {
+  app.patch('/api/polls/:id', requireUser, requirePollOwner, requireQaPoll, async (request, response) => {
     const { poll } = request
     const body = request.body || {}
     const submissions = (await database.prepare('SELECT COUNT(*) AS count FROM poll_voters WHERE poll_id = ?').get(poll.id)).count
@@ -396,7 +396,7 @@ export function registerQaRoutes({
     response.json(await getPoll(poll.id, { admin: true }))
   })
 
-  app.delete('/api/polls/:id', requireUser, async (request, response) => {
+  app.delete('/api/polls/:id', requireUser, requirePollOwner, async (request, response) => {
     const poll = await selectPoll.get(request.params.id)
     if (!poll) return response.status(404).json({ error: 'This poll could not be found.' })
     await database.prepare('DELETE FROM polls WHERE id = ?').run(poll.id)
@@ -405,9 +405,9 @@ export function registerQaRoutes({
     response.status(204).end()
   })
 
-  app.get('/api/admin/audit-logs', requireAdmin, async (_request, response) => {
+  app.get('/api/admin/audit-logs', requireAdmin, async (request, response) => {
     response.set('Cache-Control', 'no-store').json({
-      logs: await database.prepare('SELECT id, username, action, target_type AS targetType, target_id AS targetId, details, ip_address AS ipAddress, created_at AS createdAt FROM audit_logs ORDER BY created_at DESC LIMIT 500').all(),
+      logs: await database.prepare('SELECT id, username, action, target_type AS targetType, target_id AS targetId, details, ip_address AS ipAddress, created_at AS createdAt FROM audit_logs WHERE user_id = ? OR ? = 1 ORDER BY created_at DESC LIMIT 500').all(request.user.id, Number(request.user.isSuperAdmin)),
     })
   })
 

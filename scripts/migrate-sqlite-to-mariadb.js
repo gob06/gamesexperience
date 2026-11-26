@@ -2,7 +2,7 @@ import { constants, copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import path, { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
-import { createDatabase, readDatabaseConfig } from '../server/db.js'
+import { createDatabase, readDatabaseConfig } from '../server/db.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const sourceFile = path.resolve(process.env.SQLITE_PATH || path.join(root, 'data', 'roomvote.sqlite'))
@@ -16,12 +16,21 @@ const tableNames = [
   'audit_logs',
   'users',
   'sessions',
+  'account_migrations',
+  'account_theme_settings',
+  'account_logo_bank',
+  'account_theme_assets',
   'game_rooms',
   'theme_settings',
   'game_theme_settings',
   'selfie_sessions',
   'selfie_submissions',
   'selfie_session_links',
+  'logo_bank',
+  'raffle_sessions',
+  'raffle_entries',
+  'scramble_games',
+  'scramble_entries',
   'theme_assets',
   'theme_audit_logs',
   'ad_videos',

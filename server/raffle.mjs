@@ -28,8 +28,13 @@ function latestDrawWinners(winners) {
 
 export function registerRaffleRoutes({ app, database, requireUser, imageUpload, hasValidImageSignature, inTransaction, audit }) {
   const getRaffle = selectRaffle(database)
+  async function requireOwner(request, response, next) {
+    const row = await database.prepare('SELECT created_by AS ownerId FROM raffle_sessions WHERE id = ?').get(request.params.id)
+    if (!row || (row.ownerId !== request.user.id && !request.user.isSuperAdmin)) return response.status(404).json({ error: 'This raffle could not be found.' })
+    next()
+  }
 
-  app.get('/api/raffles', requireUser, async (_request, response) => {
+  app.get('/api/raffles', requireUser, async (request, response) => {
     const raffles = await database.prepare(`
       SELECT raffle_sessions.id, raffle_sessions.title,
         raffle_sessions.draw_status AS drawStatus,
@@ -40,8 +45,9 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
         (SELECT COUNT(*) FROM raffle_entries WHERE raffle_id = raffle_sessions.id) AS entryCount,
         (SELECT COUNT(*) FROM raffle_entries WHERE raffle_id = raffle_sessions.id AND won_at IS NOT NULL) AS winnerCount
       FROM raffle_sessions
+      WHERE raffle_sessions.created_by = ? OR ? = 1
       ORDER BY raffle_sessions.created_at DESC
-    `).all()
+    `).all(request.user.id, Number(request.user.isSuperAdmin))
     response.json(raffles)
   })
 
@@ -74,7 +80,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     response.status(201).json(await getRaffle.get(raffle.id))
   })
 
-  app.delete('/api/raffles/:id', requireUser, async (request, response) => {
+  app.delete('/api/raffles/:id', requireUser, requireOwner, async (request, response) => {
     const raffle = await getRaffle.get(request.params.id)
     if (!raffle) return response.status(404).json({ error: 'This raffle could not be found.' })
     await database.prepare('DELETE FROM raffle_sessions WHERE id = ?').run(raffle.id)
@@ -82,7 +88,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     response.status(204).end()
   })
 
-  app.post('/api/raffles/:id/reset', requireUser, async (request, response) => {
+  app.post('/api/raffles/:id/reset', requireUser, requireOwner, async (request, response) => {
     const reset = await inTransaction(async () => {
       const raffle = await getRaffle.get(request.params.id)
       if (!raffle) return null
@@ -189,7 +195,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     response.status(201).json({ id: entry.id, participantName, ticketNumber, registeredAt: entry.registeredAt, resetVersion: registered.resetVersion })
   })
 
-  app.get('/api/raffles/:id/host', requireUser, async (request, response) => {
+  app.get('/api/raffles/:id/host', requireUser, requireOwner, async (request, response) => {
     const raffle = await getRaffle.get(request.params.id)
     if (!raffle) return response.status(404).json({ error: 'This raffle could not be found.' })
     const entries = await database.prepare(`
@@ -202,7 +208,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     response.json({ raffle, entries, eligible, winners, latestWinners: latestDrawWinners(winners) })
   })
 
-  app.post('/api/raffles/:id/draw/start', requireUser, async (request, response) => {
+  app.post('/api/raffles/:id/draw/start', requireUser, requireOwner, async (request, response) => {
     const winnerCount = request.body?.winnerCount === undefined ? 1 : request.body.winnerCount
     if (!Number.isSafeInteger(winnerCount) || winnerCount < 1) {
       return response.status(400).json({ error: 'Number of winners must be a whole number of at least 1.' })
@@ -231,7 +237,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     response.json({ drawStatus: 'drawing', drawWinnerCount: winnerCount, eligible: result.eligible })
   })
 
-  app.post('/api/raffles/:id/draw/stop', requireUser, async (request, response) => {
+  app.post('/api/raffles/:id/draw/stop', requireUser, requireOwner, async (request, response) => {
     const now = new Date().toISOString()
     const result = await inTransaction(async () => {
       const raffle = await getRaffle.get(request.params.id)

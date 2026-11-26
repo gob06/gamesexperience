@@ -78,6 +78,10 @@ async function migrateLegacyLogos() {
     if (Array.isArray(parsed)) legacy = parsed
   } catch { /* Nothing to migrate. */ }
   if (!legacy.length) return false
+  const response = await fetch('/api/auth/status', { credentials: 'same-origin' })
+  if (!response.ok) throw new Error('Could not check the account for image bank migration.')
+  const status = await response.json() as { user?: { username?: string } | null }
+  if (status.user?.username?.toLowerCase() !== 'admin') return false
   let failed = false
   for (const logo of legacy) {
     if (typeof logo?.dataUrl !== 'string') continue
@@ -95,7 +99,7 @@ export function SavedLogoPicker({ onSelect, label = 'Image bank' }: { onSelect: 
   useEffect(() => {
     let active = true
     const sync = () => { void fetchLogos().then((next) => { if (active) setLogos(next) }) }
-    void migrateLegacyLogos().then((moved) => { if (moved) sync() })
+    void migrateLegacyLogos().then((moved) => { if (moved) sync() }).catch((error: unknown) => console.error('Could not migrate the legacy image bank:', error))
     sync()
     window.addEventListener('qr-logo-library', sync)
     return () => { active = false; window.removeEventListener('qr-logo-library', sync) }

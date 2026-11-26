@@ -118,9 +118,9 @@ async function getPoll(id, { admin = false } = {}) {
   }
 }
 
-async function listPolls() {
+async function listPolls(user) {
   const polls = []
-  for (const { id } of await database.prepare('SELECT id FROM polls ORDER BY created_at DESC').all()) polls.push(await getPoll(id, { admin: true }))
+  for (const { id } of await database.prepare('SELECT id FROM polls WHERE owner_user_id = ? OR ? = 1 ORDER BY created_at DESC').all(user.id, Number(user.isSuperAdmin))) polls.push(await getPoll(id, { admin: true }))
   return polls
 }
 
@@ -158,7 +158,6 @@ await database.prepare(`
 const selectThemeSettings = database.prepare('SELECT draft_json AS draft, published_json AS published, updated_by AS updatedBy, updated_at AS updatedAt, published_by AS publishedBy, published_at AS publishedAt FROM theme_settings WHERE id = 1')
 const selectGameThemeSettings = database.prepare('SELECT draft_json AS draft, published_json AS published, updated_by AS updatedBy, updated_at AS updatedAt, published_by AS publishedBy, published_at AS publishedAt FROM game_theme_settings WHERE id = 1')
 const selectThemeAsset = database.prepare('SELECT id, mime_type AS mimeType, size_bytes AS sizeBytes, width, height, uploaded_at AS uploadedAt FROM theme_assets WHERE id = ?')
-const selectThemeAssets = database.prepare('SELECT id, mime_type AS mimeType, size_bytes AS sizeBytes, width, height, uploaded_at AS uploadedAt FROM theme_assets ORDER BY uploaded_at DESC')
 
 function parseThemeJson(json) {
   try {
@@ -191,32 +190,13 @@ function auditGameThemeChange(user, action, details = {}) {
     .run(randomUUID(), user.id, user.username, `game-theme.${action}`, JSON.stringify(details), new Date().toISOString())
 }
 
-async function getReferencedThemeAssetIds() {
-  const settings = await selectThemeSettings.get()
-  const gameSettings = await selectGameThemeSettings.get()
-  return new Set(
-    [settings, gameSettings]
-      .flatMap((entry) => ['draft', 'published'].flatMap((key) => Object.values(getThemeConfig(entry[key]).assets)))
-      .filter((id) => typeof id === 'string'),
-  )
-}
-
-async function removeUnusedThemeAsset(id) {
-  if ((await getReferencedThemeAssetIds()).has(id)) return false
-  const asset = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(id)
-  if (!asset) return false
-  await database.prepare('DELETE FROM theme_assets WHERE id = ?').run(id)
-  const filePath = path.join(themeAssetsDirectory, asset.fileName)
-  if (existsSync(filePath)) unlinkSync(filePath)
-  return true
-}
-
-async function themeAssetsAreValid(assets, keys) {
+async function themeAssetsAreValid(assets, keys, userId = null) {
   if (!assets) return false
   for (const key of keys) {
     const value = assets[key]
     if (value === null) continue
     if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value) || !(await selectThemeAsset.get(value))) return false
+    if (userId && !(await database.prepare('SELECT asset_id FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').get(userId, value))) return false
   }
   return true
 }
@@ -250,8 +230,19 @@ function getImageDimensions(mimeType, image) {
   return null
 }
 
-async function getPublicTheme() {
-  const settings = await selectThemeSettings.get()
+async function accountTheme(userId) {
+  let settings = await database.prepare('SELECT draft_json AS draft, published_json AS published, updated_at AS updatedAt, published_at AS publishedAt FROM account_theme_settings WHERE user_id = ?').get(userId)
+  if (!settings) {
+    const now = new Date().toISOString()
+    await database.prepare('INSERT IGNORE INTO account_theme_settings (user_id, draft_json, published_json, updated_at) VALUES (?, ?, ?, ?)')
+      .run(userId, JSON.stringify(defaultTheme), JSON.stringify(defaultTheme), now)
+    settings = await database.prepare('SELECT draft_json AS draft, published_json AS published, updated_at AS updatedAt, published_at AS publishedAt FROM account_theme_settings WHERE user_id = ?').get(userId)
+  }
+  return settings
+}
+
+async function getPublicTheme(userId = null) {
+  const settings = userId ? await accountTheme(userId) : await selectThemeSettings.get()
   const config = getThemeConfig(settings.published)
   const assetUrls = {}
   for (const [key, id] of Object.entries(config.assets)) {
@@ -279,7 +270,7 @@ for (const session of await database.prepare('SELECT id, join_token_hash AS join
 }
 
 function publicUser(user) {
-  return { id: user.id, username: user.username, role: user.role }
+  return { id: user.id, username: user.username, role: user.role, isSuperAdmin: Boolean(user.isSuperAdmin) }
 }
 
 function getSessionToken(request) {
@@ -313,7 +304,7 @@ async function getCurrentUser(request) {
   if (!token) return null
   const tokenHash = hashSessionToken(token)
   const session = await database.prepare(`
-    SELECT users.id, users.username, users.role, sessions.expires_at AS expiresAt
+    SELECT users.id, users.username, users.role, users.is_superadmin AS isSuperAdmin, sessions.expires_at AS expiresAt
     FROM sessions JOIN users ON users.id = sessions.user_id
     WHERE sessions.token_hash = ?
   `).get(tokenHash)
@@ -347,6 +338,17 @@ async function requireAdmin(request, response, next) {
   next()
 }
 
+async function canManagePoll(id, user) {
+  if (!user) return false
+  const poll = await database.prepare('SELECT owner_user_id AS ownerId FROM polls WHERE id = ?').get(id)
+  return Boolean(poll && (poll.ownerId === user.id || user.isSuperAdmin))
+}
+
+async function requirePollOwner(request, response, next) {
+  if (!(await canManagePoll(request.params.id, request.user))) return response.status(404).json({ error: 'This poll could not be found.' })
+  next()
+}
+
 function validateCredentials(username, password) {
   if (typeof username !== 'string' || !/^[a-zA-Z0-9_.-]{3,40}$/.test(username)) return 'Use a username with 3–40 letters, numbers, dots, dashes, or underscores.'
   if (typeof password !== 'string' || password.length < 12 || password.length > 128) return 'Use a password between 12 and 128 characters.'
@@ -356,22 +358,24 @@ function validateCredentials(username, password) {
 async function createUser(username, password, role) {
   const salt = randomBytes(16)
   const passwordHash = scryptSync(password, salt, 64)
-  const user = { id: randomUUID(), username, role, createdAt: new Date().toISOString() }
-  await database.prepare('INSERT INTO users (id, username, password_hash, password_salt, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(user.id, username, passwordHash, salt.toString('hex'), role, user.createdAt)
+  const firstUser = !(await database.prepare('SELECT id FROM users LIMIT 1').get())
+  const user = { id: randomUUID(), username, role, isSuperAdmin: firstUser, createdAt: new Date().toISOString() }
+  await database.prepare('INSERT INTO users (id, username, password_hash, password_salt, role, created_at, is_superadmin) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(user.id, username, passwordHash, salt.toString('hex'), role, user.createdAt, Number(firstUser))
   return publicUser(user)
 }
 
 async function migrateLegacyData() {
   if (!existsSync(legacyPollsFile)) return
-  const insertPoll = database.prepare('INSERT IGNORE INTO polls (id, question, created_at) VALUES (?, ?, ?)')
+  const owner = await database.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1").get()
+  const insertPoll = database.prepare('INSERT IGNORE INTO polls (id, question, created_at, owner_user_id) VALUES (?, ?, ?, ?)')
   const insertOption = database.prepare('INSERT IGNORE INTO poll_options (id, poll_id, label, `position`, votes) VALUES (?, ?, ?, ?, ?)')
   const insertVoter = database.prepare('INSERT IGNORE INTO poll_voters (poll_id, voter_id, option_id, created_at) VALUES (?, ?, NULL, ?)')
 
   await inTransaction(async () => {
     const legacyPolls = JSON.parse(readFileSync(legacyPollsFile, 'utf8'))
     for (const poll of legacyPolls) {
-      await insertPoll.run(poll.id, poll.question, poll.createdAt || new Date().toISOString())
+      await insertPoll.run(poll.id, poll.question, poll.createdAt || new Date().toISOString(), owner?.id ?? null)
       for (const [index, option] of poll.options.entries()) await insertOption.run(option.id, poll.id, option.label, index, option.votes || 0)
       for (const voterId of poll.voterIds || []) {
         await insertVoter.run(poll.id, voterId, poll.createdAt || new Date().toISOString())
@@ -381,6 +385,35 @@ async function migrateLegacyData() {
 }
 
 await migrateLegacyData()
+
+async function migrateAccountOwnership() {
+  await inTransaction(async () => {
+    if (await database.prepare('SELECT id FROM account_migrations WHERE id = ?').get('account-isolation-v1')) return
+    const firstAdmin = await database.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1").get()
+    if (!firstAdmin) return
+    const legacyImages = await database.prepare('SELECT COUNT(*) AS count FROM logo_bank').get()
+    const imageOwner = await database.prepare('SELECT id FROM users WHERE username = ?').get('admin')
+    if (Number(legacyImages.count) && !imageOwner) throw new Error('Account isolation migration requires an existing user named admin for the legacy image bank.')
+    await database.prepare('UPDATE users SET is_superadmin = 1 WHERE id = ?').run(firstAdmin.id)
+    await database.prepare('UPDATE polls SET owner_user_id = ? WHERE owner_user_id IS NULL').run(firstAdmin.id)
+    if (Number(legacyImages.count)) {
+      await database.prepare('INSERT INTO account_logo_bank (id, owner_user_id, name, content_hash, image_mime_type, image, created_at) SELECT id, ?, name, content_hash, image_mime_type, image, created_at FROM logo_bank').run(imageOwner.id)
+    }
+    const settings = await selectThemeSettings.get()
+    for (const user of await database.prepare('SELECT id FROM users').all()) {
+      await database.prepare('INSERT INTO account_theme_settings (user_id, draft_json, published_json, updated_at, published_at) VALUES (?, ?, ?, ?, ?)')
+        .run(user.id, settings.draft, settings.published, settings.updatedAt, settings.publishedAt)
+      const assets = new Set([settings.draft, settings.published].flatMap((json) => Object.values(getThemeConfig(json).assets)).filter((id) => typeof id === 'string'))
+      for (const id of assets) await database.prepare('INSERT IGNORE INTO account_theme_assets (user_id, asset_id) VALUES (?, ?)').run(user.id, id)
+    }
+    for (const asset of await database.prepare('SELECT id, uploaded_by AS userId FROM theme_assets').all()) {
+      await database.prepare('INSERT IGNORE INTO account_theme_assets (user_id, asset_id) VALUES (?, ?)').run(asset.userId, asset.id)
+    }
+    await database.prepare('INSERT INTO account_migrations (id) VALUES (?)').run('account-isolation-v1')
+  })
+}
+
+await migrateAccountOwnership()
 
 app.get('/api/auth/status', async (request, response) => {
   const userCount = (await database.prepare('SELECT count(*) AS count FROM users').get()).count
@@ -404,6 +437,7 @@ app.post('/api/auth/setup', async (request, response) => {
     return response.status(409).json({ error: 'Initial setup has already been completed.' })
   }
   if (!user) return response.status(409).json({ error: 'Initial setup has already been completed.' })
+  await migrateAccountOwnership()
   await setSessionCookie(request, response, user.id)
   response.status(201).json({ user })
 })
@@ -413,7 +447,7 @@ app.post('/api/auth/login', rateLimit({ windowMs: 60_000, max: 20, message: 'Too
   if (typeof username !== 'string' || typeof password !== 'string') {
     return response.status(400).json({ error: 'Enter your username and password.' })
   }
-  const user = await database.prepare('SELECT id, username, role, password_hash AS passwordHash, password_salt AS passwordSalt FROM users WHERE username = ?').get(username)
+  const user = await database.prepare('SELECT id, username, role, is_superadmin AS isSuperAdmin, password_hash AS passwordHash, password_salt AS passwordSalt FROM users WHERE username = ?').get(username)
   if (!user) return response.status(401).json({ error: 'Incorrect username or password.' })
   const passwordHash = scryptSync(password, Buffer.from(user.passwordSalt, 'hex'), 64)
   if (!timingSafeEqual(passwordHash, user.passwordHash)) return response.status(401).json({ error: 'Incorrect username or password.' })
@@ -720,8 +754,8 @@ app.put('/api/admin/terms', requireAdmin, async (request, response) => {
 })
 
 app.get('/api/admin/users', requireAdmin, async (_request, response) => {
-  const users = await database.prepare('SELECT id, username, role, created_at AS createdAt FROM users ORDER BY created_at').all()
-  response.json(users)
+  const users = await database.prepare('SELECT id, username, role, is_superadmin AS isSuperAdmin, created_at AS createdAt FROM users ORDER BY created_at').all()
+  response.json(users.map((user) => ({ ...user, isSuperAdmin: Boolean(user.isSuperAdmin) })))
 })
 
 app.post('/api/admin/users', requireAdmin, async (request, response) => {
@@ -738,7 +772,34 @@ app.post('/api/admin/users', requireAdmin, async (request, response) => {
   }
 })
 
-app.get('/api/theme', async (_request, response) => response.json(await getPublicTheme()))
+app.get('/api/theme', async (request, response) => {
+  const { kind, id } = request.query
+  let ownerId
+  if (typeof kind === 'string' && typeof id === 'string') {
+    let row
+    if (kind === 'poll') row = await database.prepare('SELECT owner_user_id AS ownerId FROM polls WHERE id = ?').get(id)
+    else if (kind === 'raffle') row = await database.prepare('SELECT created_by AS ownerId FROM raffle_sessions WHERE id = ?').get(id)
+    else if (kind === 'scramble') row = await database.prepare('SELECT created_by AS ownerId FROM scramble_games WHERE id = ?').get(id)
+    else if (kind === 'selfie-join' && /^[A-Za-z0-9_-]{43}$/.test(id)) {
+      const session = await getSelfieSessionForJoin(id)
+      if (session) row = await database.prepare('SELECT owner_user_id AS ownerId FROM selfie_sessions WHERE id = ?').get(session.id)
+    } else if (kind === 'selfie-display') {
+      const token = request.get('X-Selfie-Display-Token') || ''
+      if (/^[A-Za-z0-9_-]{43}$/.test(token)) {
+        const hash = hashSessionToken(token)
+        row = await database.prepare('SELECT owner_user_id AS ownerId FROM selfie_sessions WHERE id = ? AND (display_token_hash = ? OR id IN (SELECT session_id FROM selfie_session_links WHERE display_token_hash = ?))').get(id, hash, hash)
+      }
+      if (!row) {
+        const user = await getCurrentUser(request)
+        if (user) row = await database.prepare('SELECT owner_user_id AS ownerId FROM selfie_sessions WHERE id = ? AND (owner_user_id = ? OR ? = 1)').get(id, user.id, Number(user.isSuperAdmin))
+      }
+    } else return response.status(400).json({ error: 'Invalid theme context.' })
+    if (!row?.ownerId) return response.status(404).json({ error: 'This activity could not be found.' })
+    ownerId = row.ownerId
+  } else if (kind !== undefined || id !== undefined) return response.status(400).json({ error: 'Invalid theme context.' })
+  else ownerId = (await getCurrentUser(request))?.id
+  response.set('Cache-Control', 'no-store').json(await getPublicTheme(ownerId))
+})
 
 app.get('/api/game-theme', async (_request, response) => response.json(await getPublicGameTheme()))
 
@@ -751,12 +812,20 @@ app.get('/api/game-theme/assets/:id', async (request, response) => {
   response.type(asset.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'public, max-age=3600, immutable').sendFile(path.join(themeAssetsDirectory, file.fileName))
 })
 
-app.get('/api/admin/game-theme', requireAdmin, async (_request, response) => {
+app.get('/api/admin/game-theme', requireAdmin, async (request, response) => {
   const settings = await selectGameThemeSettings.get()
+  const owned = await database.prepare('SELECT a.id, a.mime_type AS mimeType, a.size_bytes AS sizeBytes, a.width, a.height, a.uploaded_at AS uploadedAt FROM theme_assets a JOIN account_theme_assets aa ON aa.asset_id = a.id WHERE aa.user_id = ? ORDER BY a.uploaded_at DESC').all(request.user.id)
+  const sharedIds = new Set([settings.draft, settings.published].flatMap((json) => Object.values(getThemeConfig(json).assets)).filter((id) => typeof id === 'string'))
+  for (const id of sharedIds) {
+    if (!owned.some((asset) => asset.id === id)) {
+      const asset = await selectThemeAsset.get(id)
+      if (asset) owned.push(asset)
+    }
+  }
   response.json({
     draft: getThemeConfig(settings.draft),
     published: getThemeConfig(settings.published),
-    draftAssets: await selectThemeAssets.all(),
+    draftAssets: owned,
     maxUploadBytes: themeImageMaxBytes,
     updatedAt: settings.updatedAt,
     publishedAt: settings.publishedAt,
@@ -773,6 +842,13 @@ app.put('/api/admin/game-theme/draft', requireAdmin, async (request, response) =
   }
   if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys))) {
     return response.status(400).json({ error: 'Choose valid uploaded images for the game theme.' })
+  }
+  const currentGameTheme = await selectGameThemeSettings.get()
+  const sharedIds = new Set([currentGameTheme.draft, currentGameTheme.published].flatMap((json) => Object.values(getThemeConfig(json).assets)))
+  for (const id of Object.values(config.assets)) {
+    if (id !== null && !sharedIds.has(id) && !(await database.prepare('SELECT asset_id FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').get(request.user.id, id))) {
+      return response.status(400).json({ error: 'Choose valid uploaded images for the game theme.' })
+    }
   }
   if (!config.colors || colorKeys.some((key) => typeof config.colors[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(config.colors[key]))) {
     return response.status(400).json({ error: 'Game theme colors must be valid six-digit hex colors.' })
@@ -826,20 +902,21 @@ app.get('/api/admin/game-theme/audit', requireAdmin, async (_request, response) 
 
 app.get('/api/theme/assets/:id', async (request, response) => {
   const theme = await getPublicTheme()
-  if (!Object.values(theme.config.assets).includes(request.params.id)) return response.status(404).end()
+  const accounts = await database.prepare('SELECT published_json AS published FROM account_theme_settings').all()
+  if (!Object.values(theme.config.assets).includes(request.params.id) && !accounts.some((settings) => Object.values(getThemeConfig(settings.published).assets).includes(request.params.id))) return response.status(404).end()
   const asset = await selectThemeAsset.get(request.params.id)
   if (!asset) return response.status(404).end()
   const file = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
   response.type(asset.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'public, max-age=3600, immutable').sendFile(path.join(themeAssetsDirectory, file.fileName))
 })
 
-app.get('/api/admin/theme', requireAdmin, async (_request, response) => {
-  const settings = await selectThemeSettings.get()
+app.get('/api/admin/theme', requireUser, async (request, response) => {
+  const settings = await accountTheme(request.user.id)
   const draft = getThemeConfig(settings.draft)
   response.json({
     draft,
     published: getThemeConfig(settings.published),
-    draftAssets: await selectThemeAssets.all(),
+    draftAssets: await database.prepare('SELECT a.id, a.mime_type AS mimeType, a.size_bytes AS sizeBytes, a.width, a.height, a.uploaded_at AS uploadedAt FROM theme_assets a JOIN account_theme_assets aa ON aa.asset_id = a.id WHERE aa.user_id = ? ORDER BY a.uploaded_at DESC').all(request.user.id),
     maxUploadBytes: themeImageMaxBytes,
     updatedAt: settings.updatedAt,
     publishedAt: settings.publishedAt,
@@ -856,7 +933,7 @@ function limitThemeUploads(request, response, next) {
   next()
 }
 
-app.post('/api/admin/theme/assets', requireAdmin, limitThemeUploads, themeImageUpload.single('image'), async (request, response) => {
+app.post('/api/admin/theme/assets', requireUser, limitThemeUploads, themeImageUpload.single('image'), async (request, response) => {
   const { file } = request
   if (!file) return response.status(400).json({ error: 'Choose an image to upload.' })
 
@@ -877,8 +954,11 @@ app.post('/api/admin/theme/assets', requireAdmin, limitThemeUploads, themeImageU
   const uploadedAt = new Date().toISOString()
   try {
     writeFileSync(path.join(themeAssetsDirectory, fileName), file.buffer, { flag: 'wx' })
-    await database.prepare('INSERT INTO theme_assets (id, file_name, mime_type, size_bytes, width, height, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, fileName, mimeType, file.size, dimensions.width, dimensions.height, request.user.id, uploadedAt)
+    await inTransaction(async () => {
+      await database.prepare('INSERT INTO theme_assets (id, file_name, mime_type, size_bytes, width, height, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, fileName, mimeType, file.size, dimensions.width, dimensions.height, request.user.id, uploadedAt)
+      await database.prepare('INSERT INTO account_theme_assets (user_id, asset_id) VALUES (?, ?)').run(request.user.id, id)
+    })
   } catch (error) {
     const filePath = path.join(themeAssetsDirectory, fileName)
     if (existsSync(filePath)) unlinkSync(filePath)
@@ -888,14 +968,18 @@ app.post('/api/admin/theme/assets', requireAdmin, limitThemeUploads, themeImageU
   response.status(201).json({ asset: { id, mimeType, sizeBytes: file.size, width: dimensions.width, height: dimensions.height, uploadedAt, url: `/api/admin/theme/assets/${encodeURIComponent(id)}` } })
 })
 
-app.get('/api/admin/theme/assets/:id', requireAdmin, async (request, response) => {
+app.get('/api/admin/theme/assets/:id', requireUser, async (request, response) => {
+  const owned = await database.prepare('SELECT asset_id FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').get(request.user.id, request.params.id)
+  const game = request.user.role === 'admin' ? await selectGameThemeSettings.get() : null
+  const gameAssets = game ? [game.draft, game.published].flatMap((json) => Object.values(getThemeConfig(json).assets)) : []
+  if (!owned && !gameAssets.includes(request.params.id)) return response.status(404).json({ error: 'Theme image not found.' })
   const asset = await selectThemeAsset.get(request.params.id)
   if (!asset) return response.status(404).json({ error: 'Theme image not found.' })
   const file = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
-  response.type(asset.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'private, max-age=3600, immutable').sendFile(path.join(themeAssetsDirectory, file.fileName))
+  response.type(asset.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').sendFile(path.join(themeAssetsDirectory, file.fileName))
 })
 
-app.put('/api/admin/theme/draft', requireAdmin, async (request, response) => {
+app.put('/api/admin/theme/draft', requireUser, async (request, response) => {
   const config = request.body
   const assetKeys = Object.keys(defaultTheme.assets)
   const colorKeys = Object.keys(defaultTheme.colors)
@@ -903,7 +987,7 @@ app.put('/api/admin/theme/draft', requireAdmin, async (request, response) => {
   if (!config || typeof config !== 'object' || Array.isArray(config) || typeof config.eventTitle !== 'string' || config.eventTitle.trim().length < 1 || config.eventTitle.trim().length > 80) {
     return response.status(400).json({ error: 'Enter an event title between 1 and 80 characters.' })
   }
-  if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys))) {
+  if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys, request.user.id))) {
     return response.status(400).json({ error: 'Choose valid uploaded images for the theme.' })
   }
   if (!config.colors || colorKeys.some((key) => typeof config.colors[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(config.colors[key]))) {
@@ -933,42 +1017,44 @@ app.put('/api/admin/theme/draft', requireAdmin, async (request, response) => {
     },
   }
   const updatedAt = new Date().toISOString()
-  await database.prepare('UPDATE theme_settings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = 1')
-    .run(JSON.stringify(normalized), request.user.id, updatedAt)
+  await accountTheme(request.user.id)
+  await database.prepare('UPDATE account_theme_settings SET draft_json = ?, updated_at = ? WHERE user_id = ?')
+    .run(JSON.stringify(normalized), updatedAt, request.user.id)
   await auditThemeChange(request.user, 'draft.save', { eventTitle: normalized.eventTitle, theme: normalized.skin })
   response.json({ draft: normalized, updatedAt })
 })
 
-app.post('/api/admin/theme/publish', requireAdmin, async (_request, response) => {
-  const settings = await selectThemeSettings.get()
+app.post('/api/admin/theme/publish', requireUser, async (_request, response) => {
+  const settings = await accountTheme(_request.user.id)
   const publishedAt = new Date().toISOString()
-  await database.prepare('UPDATE theme_settings SET published_json = draft_json, published_by = ?, published_at = ? WHERE id = 1')
-    .run(_request.user.id, publishedAt)
+  await database.prepare('UPDATE account_theme_settings SET published_json = draft_json, published_at = ? WHERE user_id = ?')
+    .run(publishedAt, _request.user.id)
   await auditThemeChange(_request.user, 'theme.publish', { eventTitle: getThemeConfig(settings.draft).eventTitle })
   response.json({ published: getThemeConfig(settings.draft), publishedAt })
 })
 
-app.post('/api/admin/theme/reset', requireAdmin, async (_request, response) => {
+app.post('/api/admin/theme/reset', requireUser, async (_request, response) => {
   const now = new Date().toISOString()
-  await database.prepare('UPDATE theme_settings SET draft_json = ?, published_json = ?, updated_by = ?, updated_at = ?, published_by = ?, published_at = ? WHERE id = 1')
-    .run(JSON.stringify(defaultTheme), JSON.stringify(defaultTheme), _request.user.id, now, _request.user.id, now)
+  await accountTheme(_request.user.id)
+  await database.prepare('UPDATE account_theme_settings SET draft_json = ?, published_json = ?, updated_at = ?, published_at = ? WHERE user_id = ?')
+    .run(JSON.stringify(defaultTheme), JSON.stringify(defaultTheme), now, now, _request.user.id)
   await auditThemeChange(_request.user, 'theme.reset')
-  for (const asset of await selectThemeAssets.all()) await removeUnusedThemeAsset(asset.id)
   response.json({ theme: defaultTheme, resetAt: now })
 })
 
-app.delete('/api/admin/theme/assets/:id', requireAdmin, async (request, response) => {
-  if ((await getReferencedThemeAssetIds()).has(request.params.id)) {
+app.delete('/api/admin/theme/assets/:id', requireUser, async (request, response) => {
+  const settings = await accountTheme(request.user.id)
+  if ([settings.draft, settings.published].some((json) => Object.values(getThemeConfig(json).assets).includes(request.params.id))) {
     return response.status(409).json({ error: 'Remove this image from both the draft and published themes before deleting it.' })
   }
-  const deleted = await removeUnusedThemeAsset(request.params.id)
-  if (!deleted) return response.status(404).json({ error: 'Theme image not found.' })
+  const deleted = await database.prepare('DELETE FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').run(request.user.id, request.params.id)
+  if (!deleted.changes) return response.status(404).json({ error: 'Theme image not found.' })
   await auditThemeChange(request.user, 'asset.delete', { assetId: request.params.id })
   response.status(204).end()
 })
 
-app.get('/api/admin/theme/audit', requireAdmin, async (_request, response) => {
-  const entries = await database.prepare('SELECT administrator_name AS administrator, action, details, created_at AS createdAt FROM theme_audit_logs ORDER BY created_at DESC LIMIT 100').all()
+app.get('/api/admin/theme/audit', requireUser, async (request, response) => {
+  const entries = await database.prepare('SELECT administrator_name AS administrator, action, details, created_at AS createdAt FROM theme_audit_logs WHERE administrator_id = ? ORDER BY created_at DESC LIMIT 100').all(request.user.id)
   response.json(entries.map((entry) => ({ ...entry, details: JSON.parse(entry.details) })))
 })
 
@@ -976,8 +1062,8 @@ function getSelfieSessionForOwner(sessionId, user) {
   return database.prepare(`
     SELECT id, owner_user_id AS ownerUserId, created_at AS createdAt, closed_at AS closedAt, paused, rotation_seconds AS rotationSeconds, santa_enabled AS santaEnabled
     FROM selfie_sessions
-    WHERE id = ? AND (owner_user_id = ? OR ? = 'admin')
-  `).get(sessionId, user.id, user.role)
+    WHERE id = ? AND (owner_user_id = ? OR ? = 1)
+  `).get(sessionId, user.id, Number(user.isSuperAdmin))
 }
 
 function getSelfieSessionForJoin(token) {
@@ -1025,9 +1111,9 @@ app.get('/api/selfie/sessions', requireUser, async (request, response) => {
       (SELECT COUNT(*) FROM selfie_submissions sub WHERE sub.session_id = sess.id) AS photoCount,
       (SELECT COUNT(*) FROM selfie_submissions sub WHERE sub.session_id = sess.id AND sub.status = 'approved') AS approvedCount
     FROM selfie_sessions sess JOIN users u ON u.id = sess.owner_user_id
-    WHERE sess.owner_user_id = ? OR ? = 'admin'
+    WHERE sess.owner_user_id = ? OR ? = 1
     ORDER BY sess.created_at DESC, sess.id DESC
-  `).all(request.user.id, request.user.role)
+  `).all(request.user.id, Number(request.user.isSuperAdmin))
   response.set('Cache-Control', 'no-store').json({
     sessions: sessions.map((session) => ({ ...session, paused: Boolean(session.paused), santaEnabled: Boolean(session.santaEnabled) })),
   })
@@ -1048,17 +1134,19 @@ app.post('/api/selfie/sessions/:id/links', requireUser, async (request, response
   })
 })
 
-app.get('/api/admin/selfie/sessions', requireAdmin, async (_request, response) => {
+app.get('/api/admin/selfie/sessions', requireAdmin, async (request, response) => {
   const sessions = await database.prepare(`
     SELECT sess.id, u.username AS host, sess.created_at AS createdAt, sess.closed_at AS closedAt,
       sess.paused, sess.santa_enabled AS santaEnabled
     FROM selfie_sessions sess JOIN users u ON u.id = sess.owner_user_id
+    WHERE sess.owner_user_id = ? OR ? = 1
     ORDER BY sess.created_at DESC, sess.id DESC
-  `).all()
+  `).all(request.user.id, Number(request.user.isSuperAdmin))
   const photos = await database.prepare(`
     SELECT sub.id, sub.session_id AS sessionId, sub.status, sub.created_at AS createdAt, sub.approved_at AS approvedAt
-    FROM selfie_submissions sub ORDER BY sub.created_at DESC
-  `).all()
+    FROM selfie_submissions sub JOIN selfie_sessions sess ON sess.id = sub.session_id
+    WHERE sess.owner_user_id = ? OR ? = 1 ORDER BY sub.created_at DESC
+  `).all(request.user.id, Number(request.user.isSuperAdmin))
   response.set('Cache-Control', 'no-store').json({
     sessions: sessions.map((session) => ({
       ...session, paused: Boolean(session.paused), santaEnabled: Boolean(session.santaEnabled),
@@ -1071,8 +1159,8 @@ app.get('/api/admin/selfie/sessions/:sessionId/photos/:photoId/image', requireAd
   const photo = await database.prepare(`
     SELECT sub.image, sub.image_mime_type AS mimeType
     FROM selfie_submissions sub JOIN selfie_sessions sess ON sess.id = sub.session_id
-    WHERE sub.id = ? AND sub.session_id = ?
-  `).get(request.params.photoId, request.params.sessionId)
+    WHERE sub.id = ? AND sub.session_id = ? AND (sess.owner_user_id = ? OR ? = 1)
+  `).get(request.params.photoId, request.params.sessionId, request.user.id, Number(request.user.isSuperAdmin))
   if (!photo) return response.status(404).json({ error: 'This session photo could not be found.' })
   response.type(photo.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(photo.image))
 })
@@ -1242,8 +1330,8 @@ app.get('/api/selfie/sessions/:sessionId/submissions/:submissionId/image', requi
     SELECT sub.image, sub.image_mime_type AS mimeType
     FROM selfie_submissions sub
     JOIN selfie_sessions sess ON sess.id = sub.session_id
-    WHERE sub.id = ? AND sub.session_id = ? AND (sess.owner_user_id = ? OR ? = 'admin')
-  `).get(request.params.submissionId, request.params.sessionId, request.user.id, request.user.role)
+    WHERE sub.id = ? AND sub.session_id = ? AND (sess.owner_user_id = ? OR ? = 1)
+  `).get(request.params.submissionId, request.params.sessionId, request.user.id, Number(request.user.isSuperAdmin))
   if (!image) return response.status(404).end()
   response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(image.image))
 })
@@ -1268,8 +1356,8 @@ app.delete('/api/selfie/sessions/:id', requireUser, async (request, response) =>
   response.status(204).end()
 })
 
-app.get('/api/logo-bank', requireUser, async (_request, response) => {
-  const rows = await database.prepare('SELECT id, name FROM logo_bank ORDER BY created_at DESC LIMIT 200').all()
+app.get('/api/logo-bank', requireUser, async (request, response) => {
+  const rows = await database.prepare('SELECT id, name FROM account_logo_bank WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 200').all(request.user.id)
   response.set('Cache-Control', 'no-store').json({ logos: rows })
 })
 
@@ -1279,30 +1367,31 @@ app.post('/api/logo-bank', requireUser, imageUpload.single('image'), async (requ
     return response.status(400).json({ error: 'Upload a valid JPEG, PNG, or WebP image.' })
   }
   const hash = createHash('sha256').update(file.buffer).digest('hex')
-  const existing = await database.prepare('SELECT id, name FROM logo_bank WHERE content_hash = ?').get(hash)
+  const existing = await database.prepare('SELECT id, name FROM account_logo_bank WHERE owner_user_id = ? AND content_hash = ?').get(request.user.id, hash)
   if (existing) return response.status(200).json(existing)
   const id = randomUUID()
   const name = String(request.body?.name || file.originalname || 'logo').slice(0, 120)
-  await database.prepare('INSERT INTO logo_bank (id, name, content_hash, image_mime_type, image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, name, hash, file.mimetype, file.buffer, new Date().toISOString())
+  await database.prepare('INSERT INTO account_logo_bank (id, owner_user_id, name, content_hash, image_mime_type, image, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, request.user.id, name, hash, file.mimetype, file.buffer, new Date().toISOString())
   response.status(201).json({ id, name })
 })
 
 app.get('/api/logo-bank/:id/image', requireUser, async (request, response) => {
-  const image = await database.prepare('SELECT image, image_mime_type AS mimeType FROM logo_bank WHERE id = ?').get(request.params.id)
+  const image = await database.prepare('SELECT image, image_mime_type AS mimeType FROM account_logo_bank WHERE id = ? AND owner_user_id = ?').get(request.params.id, request.user.id)
   if (!image) return response.status(404).end()
-  response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'private, max-age=3600').send(Buffer.from(image.image))
+  response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(image.image))
 })
 
 app.delete('/api/logo-bank/:id', requireUser, async (request, response) => {
-  await database.prepare('DELETE FROM logo_bank WHERE id = ?').run(request.params.id)
+  const result = await database.prepare('DELETE FROM account_logo_bank WHERE id = ? AND owner_user_id = ?').run(request.params.id, request.user.id)
+  if (!result.changes) return response.status(404).json({ error: 'Image not found.' })
   response.status(204).end()
 })
 
-app.get('/api/polls', requireUser, async (_request, response) => response.json(await listPolls()))
+app.get('/api/polls', requireUser, async (request, response) => response.json(await listPolls(request.user)))
 
 app.get('/api/polls/:id', async (request, response) => {
-  const poll = await getPoll(request.params.id, { admin: Boolean(await getCurrentUser(request)) })
+  const poll = await getPoll(request.params.id, { admin: await canManagePoll(request.params.id, await getCurrentUser(request)) })
   if (!poll) return response.status(404).json({ error: 'This poll could not be found.' })
   response.set('Cache-Control', 'no-store').json(poll)
 })
@@ -1413,8 +1502,8 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
   const optionsWithIds = options.map((option) => ({ ...option, id: randomUUID() }))
   const correctOptionId = optionsWithIds.find((option) => option.isCorrect)?.id || null
   await inTransaction(async () => {
-    await database.prepare('INSERT INTO polls (id, question, created_at,     logo_mime_type,     logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-              .run(poll.id, question, poll.createdAt, logoFile?.mimetype || null, logoFile?.buffer || null, Number(isQa), correctOptionId, questionImageFile?.mimetype || null, questionImageFile?.buffer || null, Number(isQa && request.body.revealCorrect === 'true'))
+    await database.prepare('INSERT INTO polls (id, question, created_at, logo_mime_type, logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+              .run(poll.id, question, poll.createdAt, logoFile?.mimetype || null, logoFile?.buffer || null, Number(isQa), correctOptionId, questionImageFile?.mimetype || null, questionImageFile?.buffer || null, Number(isQa && request.body.revealCorrect === 'true'), request.user.id)
     const insertOption = database.prepare('INSERT INTO poll_options (id, poll_id, label, `position`, votes, image_mime_type, image, hide_label) VALUES (?, ?, ?, ?, 0, ?, ?, ?)')
     for (const [index, option] of optionsWithIds.entries()) {
       const file = option.imageIndex === null ? null : optionFiles[option.imageIndex]
@@ -1425,7 +1514,7 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
   response.status(201).json(await getPoll(poll.id, { admin: true }))
 })
 
-app.patch('/api/polls/:id/settings', requireUser, async (request, response) => {
+app.patch('/api/polls/:id/settings', requireUser, requirePollOwner, async (request, response) => {
   const pollId = request.params.id
   if (!(await selectPoll.get(pollId))) return response.status(404).json({ error: 'This poll could not be found.' })
   const { votingEnabled, videoEnabled, revealCorrect } = request.body || {}
@@ -1439,7 +1528,7 @@ app.patch('/api/polls/:id/settings', requireUser, async (request, response) => {
   response.json(await getPoll(pollId, { admin: true }))
 })
 
-app.patch('/api/polls/:id', requireUser, async (request, response, next) => {
+app.patch('/api/polls/:id', requireUser, requirePollOwner, async (request, response, next) => {
   const poll = await selectPoll.get(request.params.id)
   if (!poll) return response.status(404).json({ error: 'This poll could not be found.' })
   if (poll.isQa) return next()
@@ -1505,7 +1594,7 @@ app.post('/api/polls/:id/votes', async (request, response, next) => {
 })
 
 const qa = registerQaRoutes({
-  app, database, requireUser, requireAdmin, getCookie, getVotingCookieName, hashSessionToken,
+  app, database, requireUser, requireAdmin, requirePollOwner, getCookie, getVotingCookieName, hashSessionToken,
   selectPoll, selectAdVideo, adVideosDirectory, inTransaction, getPoll, audit,
 })
 

@@ -46,7 +46,7 @@ import { ScrambleDisplayPage, ScrambleHostPage, ScrambleJoinPage } from './Scram
 
 type PollOption = { id: string; label: string; votes: number; imageUrl?: string | null; hideLabel?: boolean }
 type Poll = { id: string; question: string; joinTitle?: string | null; questionImageUrl?: string | null; options: PollOption[]; createdAt: string; logoUrl?: string | null; isQa: boolean; winnerName?: string; winnerTicketNumber?: string; winnerAnswer?: string; votingEnabled: boolean; videoEnabled: boolean; revealCorrect?: boolean; correctOptionId?: string | null; stats?: { participants: number; submissions: number; winners: number; nonWinners: number } }
-type AuthUser = { id: string; username: string; role: 'admin' | 'host' }
+type AuthUser = { id: string; username: string; role: 'admin' | 'host'; isSuperAdmin: boolean }
 type OptionDraft = { label: string; imageFile: File | null; previewUrl: string; hideName: boolean }
 
 function resultOptionColor(index: number, optionCount: number) {
@@ -411,7 +411,8 @@ function App() {
     setAuthUser(user)
     setSetupRequired(false)
     setAuthError('')
-    if (['/admin/users', '/admin/theme', '/admin/game-theme', '/admin/videos', '/admin/terms'].includes(window.location.pathname) && user.role !== 'admin') window.location.replace('/')
+    window.dispatchEvent(new Event('account-theme-refresh'))
+    if (['/admin/users', '/admin/game-theme', '/admin/videos', '/admin/terms'].includes(window.location.pathname) && user.role !== 'admin') window.location.replace('/')
   }
 
   async function updatePollSettings(pollId: string, settings: Partial<Pick<Poll, 'votingEnabled' | 'videoEnabled' | 'revealCorrect'>>) {
@@ -445,6 +446,7 @@ function App() {
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' })
     setAuthUser(null)
+    window.dispatchEvent(new Event('account-theme-refresh'))
   }
 
   // The scramble join page shows its own thank-you screen with the answer result.
@@ -465,9 +467,7 @@ function App() {
   if (window.location.pathname === '/raffle') return <RaffleHostPage user={authUser} onLogout={() => void logout()} />
   if (window.location.pathname === '/scramble') return <ScrambleHostPage user={authUser} onLogout={() => void logout()} />
   if (window.location.pathname === '/admin/theme') {
-    return authUser.role === 'admin'
-      ? <ThemeSettings onBack={() => window.location.assign('/')} />
-      : <AccessDeniedPage onLogout={() => void logout()} />
+    return <ThemeSettings onBack={() => window.location.assign('/')} />
   }
   if (window.location.pathname === '/admin/game-theme') {
     return authUser.role === 'admin'
@@ -516,8 +516,8 @@ function App() {
         <ThemeBrand />
         <div className="topbar-actions">
           <a className="button button-quiet manage-users-link" href="/" aria-label="Choose activity" title="Choose activity"><ArrowUpRight size={16} /> Dashboard</a>
+          <a className="button button-quiet manage-users-link theme-settings-link" href="/admin/theme" aria-label="Appearance and theme settings" title="Appearance and theme settings"><Palette size={16} /> Appearance &amp; Theme Settings</a>
           {authUser.role === 'admin' && <>
-            <a className="button button-quiet manage-users-link theme-settings-link" href="/admin/theme" aria-label="Appearance and theme settings" title="Appearance and theme settings"><Palette size={16} /> Appearance &amp; Theme Settings</a>
             <a className="button button-quiet manage-users-link" href="/admin/users" aria-label="Manage users" title="Manage users"><Users size={16} /> Manage users</a>
           </>}
           <span className="signed-in-user">{authUser.username}</span>
@@ -683,11 +683,11 @@ function ActivityDashboard({
       <header className="topbar">
         <ThemeBrand />
         <div className="topbar-actions">
+          <a className="button button-quiet manage-users-link theme-settings-link" href="/admin/theme" aria-label="Appearance and theme settings" title="Appearance and theme settings"><Palette size={16} /> Appearance &amp; Theme Settings</a>
           {user.role === 'admin' && <>
             <a className="button button-quiet manage-users-link" href="/admin/selfie"><Camera size={16} /> Selfie monitor</a>
             <a className="button button-quiet manage-users-link" href="/admin/videos" aria-label="Manage videos" title="Manage videos"><Film size={16} /> Videos</a>
             <a className="button button-quiet manage-users-link" href="/admin/terms" aria-label="Edit Terms of Service" title="Edit Terms of Service"><FileText size={16} /> Terms</a>
-            <a className="button button-quiet manage-users-link theme-settings-link" href="/admin/theme" aria-label="Appearance and theme settings" title="Appearance and theme settings"><Palette size={16} /> Appearance &amp; Theme Settings</a>
             <a className="button button-quiet manage-users-link" href="/admin/users" aria-label="Manage users" title="Manage users"><Users size={16} /> Manage users</a>
           </>}
           <span className="signed-in-user">{user.username}</span>
@@ -1427,7 +1427,7 @@ function AdminUsersPage({ currentUser, onLogout }: { currentUser: AuthUser; onLo
           </form>
           <section className="admin-user-list" aria-labelledby="users-title">
             <div className="admin-form-title"><Users size={18} /><h2 id="users-title">Accounts</h2><span>{users.length}</span></div>
-            {loading ? <p className="auth-hint">Loading accounts…</p> : users.map((user) => <div className="admin-user-row" key={user.id}><span className="admin-user-avatar">{user.username.slice(0, 1).toUpperCase()}</span><span className="admin-user-name">{user.username}<small>{user.id === currentUser.id ? 'You' : 'VOTE account'}</small></span><span className={`role-tag role-${user.role}`}>{user.role}</span></div>)}
+            {loading ? <p className="auth-hint">Loading accounts…</p> : users.map((user) => <div className="admin-user-row" key={user.id}><span className="admin-user-avatar">{user.username.slice(0, 1).toUpperCase()}</span><span className="admin-user-name">{user.username}<small>{user.id === currentUser.id ? 'You' : 'VOTE account'}</small></span><span className={`role-tag role-${user.role}`}>{user.isSuperAdmin ? 'superadmin' : user.role}</span></div>)}
           </section>
         </div>
       </div>

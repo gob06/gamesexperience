@@ -74,7 +74,26 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
 
   async function refreshTheme() {
-    const response = await fetch('/api/theme', { cache: 'no-store' })
+    const path = window.location.pathname
+    const activity = path.match(/^\/poll\/([^/]+)(?:\/(?:display|monitor))?\/?$/)
+      || path.match(/^\/(raffle|scramble)\/join\/([^/]+)\/?$/)
+      || path.match(/^\/(raffle|scramble)\/([^/]+)\/display\/?$/)
+    const selfieJoin = path.match(/^\/selfie\/join\/([A-Za-z0-9_-]+)\/?$/)
+    const selfieDisplay = path.match(/^\/selfie\/display\/([A-Za-z0-9_-]+)\/?$/)
+    const params = new URLSearchParams()
+    if (activity) {
+      const kind = activity.length === 2 ? 'poll' : activity[1]
+      params.set('kind', kind)
+      params.set('id', decodeURIComponent(activity[activity.length - 1]))
+    } else if (selfieJoin) {
+      params.set('kind', 'selfie-join')
+      params.set('id', selfieJoin[1])
+    } else if (selfieDisplay) {
+      params.set('kind', 'selfie-display')
+      params.set('id', selfieDisplay[1])
+    }
+    const displayToken = selfieDisplay ? new URLSearchParams(window.location.hash.slice(1)).get('display') : null
+    const response = await fetch(`/api/theme${params.size ? `?${params}` : ''}`, { cache: 'no-store', headers: displayToken ? { 'X-Selfie-Display-Token': displayToken } : undefined })
     if (!response.ok) throw new Error('The published theme could not be loaded.')
     const result: { config: ThemeConfig; assetUrls: Record<string, string> } = await response.json()
     setTheme(result.config)
@@ -89,9 +108,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }, 10000)
     const onFocus = () => { void refreshTheme().catch((error: unknown) => console.error(error)) }
     window.addEventListener('focus', onFocus)
+    window.addEventListener('account-theme-refresh', onFocus)
     return () => {
       window.clearInterval(timer)
       window.removeEventListener('focus', onFocus)
+      window.removeEventListener('account-theme-refresh', onFocus)
     }
   }, [])
 

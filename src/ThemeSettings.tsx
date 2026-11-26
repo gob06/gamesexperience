@@ -137,7 +137,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
   }
 
   async function publishTheme() {
-    if (!window.confirm(scope === 'game' ? 'Publish this theme to Vanishing Tic-Tac-Toe only?' : 'Publish this theme to all live voting and results pages?')) return
+    if (!window.confirm(scope === 'game' ? 'Publish this theme to Vanishing Tic-Tac-Toe only?' : 'Publish this theme to your activities and their public pages?')) return
     setBusy(true)
     setError('')
     setNotice('')
@@ -155,7 +155,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
       setPublished(result.published)
       if (scope === 'site') await refreshTheme()
       await loadSettings()
-      setNotice(scope === 'game' ? 'Game theme published to Vanishing Tic-Tac-Toe.' : 'Theme published to the live application.')
+      setNotice(scope === 'game' ? 'Game theme published to Vanishing Tic-Tac-Toe.' : 'Theme published to your activities.')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not publish the theme.')
     } finally {
@@ -166,7 +166,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
   async function resetTheme() {
     if (!window.confirm(scope === 'game'
       ? 'Restore and publish the default Vanishing Tic-Tac-Toe theme? This does not change the main site theme.'
-      : 'Restore and publish the default theme? This removes unreferenced theme assets but keeps all polls and votes.')) return
+      : 'Restore and publish the default theme for your account? Your uploaded images, polls and votes will be kept.')) return
     setBusy(true)
     setError('')
     setNotice('')
@@ -188,7 +188,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
   }
 
   async function deleteAsset(assetId: string) {
-    if (!window.confirm('Permanently delete this uploaded image?')) return
+    if (!window.confirm('Remove this uploaded image from your theme library?')) return
     setBusy(true)
     setError('')
     try {

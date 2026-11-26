@@ -110,6 +110,11 @@ function participantState(entry) {
 
 export function registerScrambleRoutes({ app, database, requireUser, imageUpload, hasValidImageSignature, inTransaction, audit }) {
   const getGame = async (id) => database.prepare(selectGameSql).get(id)
+  async function requireOwner(request, response, next) {
+    const row = await database.prepare('SELECT created_by AS ownerId FROM scramble_games WHERE id = ?').get(request.params.id)
+    if (!row || (row.ownerId !== request.user.id && !request.user.isSuperAdmin)) return response.status(404).json({ error: 'This word scramble could not be found.' })
+    next()
+  }
   const getEntry = async (gameId, entryId) => database.prepare(`
     SELECT id, game_id AS gameId, participant_name AS participantName, ticket_number AS ticketNumber,
       answer, is_correct AS isCorrect, answered_at AS answeredAt
@@ -141,7 +146,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     }
   }
 
-  app.get('/api/scrambles', requireUser, async (_request, response) => {
+  app.get('/api/scrambles', requireUser, async (request, response) => {
     const games = await database.prepare(`
       SELECT scramble_games.id, scramble_games.title, scramble_games.status,
         scramble_games.created_at AS createdAt,
@@ -149,8 +154,9 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
         (SELECT COUNT(*) FROM scramble_entries WHERE game_id = scramble_games.id) AS entryCount,
         (SELECT COUNT(*) FROM scramble_entries WHERE game_id = scramble_games.id AND confirmed_at IS NOT NULL) AS winnerCount
       FROM scramble_games
+      WHERE scramble_games.created_by = ? OR ? = 1
       ORDER BY scramble_games.created_at DESC
-    `).all()
+    `).all(request.user.id, Number(request.user.isSuperAdmin))
     response.json(games)
   })
 
@@ -182,7 +188,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.status(201).json(hostGame(await getGame(id)))
   })
 
-  app.delete('/api/scrambles/:id', requireUser, async (request, response) => {
+  app.delete('/api/scrambles/:id', requireUser, requireOwner, async (request, response) => {
     const game = await getGame(request.params.id)
     if (!game) return response.status(404).json({ error: 'This word scramble could not be found.' })
     await database.prepare('DELETE FROM scramble_games WHERE id = ?').run(game.id)
@@ -210,7 +216,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(image.image))
   })
 
-  app.put('/api/scrambles/:id/word', requireUser, async (request, response) => {
+  app.put('/api/scrambles/:id/word', requireUser, requireOwner, async (request, response) => {
     const game = await getGame(request.params.id)
     if (!game) return response.status(404).json({ error: 'This word scramble could not be found.' })
     // The answer locks once the game starts; changing it afterwards requires explicit confirmation.
@@ -243,7 +249,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     complete: { from: ['closed'], to: 'completed' },
   }
 
-  app.post('/api/scrambles/:id/status', requireUser, async (request, response) => {
+  app.post('/api/scrambles/:id/status', requireUser, requireOwner, async (request, response) => {
     const action = statusActions[request.body?.action]
     if (!action) return response.status(400).json({ error: 'Choose a valid game action.' })
     const result = await inTransaction(async () => {
@@ -260,13 +266,13 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.json(hostGame(await getGame(request.params.id)))
   })
 
-  app.post('/api/scrambles/:id/reveal', requireUser, async (request, response) => {
+  app.post('/api/scrambles/:id/reveal', requireUser, requireOwner, async (request, response) => {
     const game = await getGame(request.params.id)
     if (!game) return response.status(404).json({ error: 'This word scramble could not be found.' })
     response.status(409).json({ error: 'Announce confirmed winners to reveal the answer.' })
   })
 
-  app.post('/api/scrambles/:id/reset', requireUser, async (request, response) => {
+  app.post('/api/scrambles/:id/reset', requireUser, requireOwner, async (request, response) => {
     const game = await getGame(request.params.id)
     if (!game) return response.status(404).json({ error: 'This word scramble could not be found.' })
     await inTransaction(async () => {
@@ -356,7 +362,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.json({ correct: result.correct })
   })
 
-  app.get('/api/scrambles/:id/host', requireUser, async (request, response) => {
+  app.get('/api/scrambles/:id/host', requireUser, requireOwner, async (request, response) => {
     const game = await getGame(request.params.id)
     if (!game) return response.status(404).json({ error: 'This word scramble could not be found.' })
     const [stats, entries] = await Promise.all([
@@ -375,7 +381,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     })
   })
 
-  app.post('/api/scrambles/:id/winners/randomize', requireUser, async (request, response) => {
+  app.post('/api/scrambles/:id/winners/randomize', requireUser, requireOwner, async (request, response) => {
     const count = Number(request.body?.count)
     if (!Number.isInteger(count) || count < 1) return response.status(400).json({ error: 'Choose at least one winner.' })
     const now = new Date().toISOString()
@@ -407,7 +413,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.json({ ok: true })
   })
 
-  app.post('/api/scrambles/:id/winners/confirm', requireUser, async (request, response) => {
+  app.post('/api/scrambles/:id/winners/confirm', requireUser, requireOwner, async (request, response) => {
     const now = new Date().toISOString()
     const result = await inTransaction(async () => {
       const game = await getGame(request.params.id)
@@ -425,7 +431,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.json({ ok: true })
   })
 
-  app.post('/api/scrambles/:id/winners/:entryId/announce', requireUser, async (request, response) => {
+  app.post('/api/scrambles/:id/winners/:entryId/announce', requireUser, requireOwner, async (request, response) => {
     const now = new Date().toISOString()
     const announced = await inTransaction(async () => {
       const result = await database.prepare(`
@@ -440,7 +446,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.json({ ok: true })
   })
 
-  app.post('/api/scrambles/:id/winners/announce-all', requireUser, async (request, response) => {
+  app.post('/api/scrambles/:id/winners/announce-all', requireUser, requireOwner, async (request, response) => {
     const now = new Date().toISOString()
     const announced = await inTransaction(async () => {
       const result = await database.prepare(`
