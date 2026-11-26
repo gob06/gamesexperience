@@ -775,7 +775,10 @@ app.post('/api/admin/users', requireAdmin, async (request, response) => {
 app.get('/api/theme', async (request, response) => {
   const { kind, id } = request.query
   let ownerId
-  if (typeof kind === 'string' && typeof id === 'string') {
+  if (kind === 'login' && id === undefined) {
+    const superadmin = await database.prepare('SELECT id FROM users WHERE is_superadmin = 1 ORDER BY created_at, id LIMIT 1').get()
+    ownerId = superadmin?.id
+  } else if (typeof kind === 'string' && typeof id === 'string') {
     let row
     if (kind === 'poll') row = await database.prepare('SELECT owner_user_id AS ownerId FROM polls WHERE id = ?').get(id)
     else if (kind === 'raffle') row = await database.prepare('SELECT created_by AS ownerId FROM raffle_sessions WHERE id = ?').get(id)

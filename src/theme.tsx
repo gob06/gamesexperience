@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 export type ThemeSkin = 'broadcast' | 'classic'
 
@@ -48,12 +48,14 @@ type ThemeContextValue = {
   theme: ThemeConfig
   assetUrls: Record<string, string>
   refreshTheme: () => Promise<void>
+  setLoginThemeActive: (active: boolean) => void
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: DEFAULT_THEME,
   assetUrls: {},
   refreshTheme: async () => {},
+  setLoginThemeActive: () => {},
 })
 
 export function useTheme() {
@@ -72,8 +74,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return { ...DEFAULT_THEME, skin: THEME_SKINS.some((skin) => skin.id === cached) ? cached as ThemeSkin : DEFAULT_THEME.skin }
   })
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
+  const loginThemeActive = useRef(false)
+  const latestRequest = useRef(0)
+  const setLoginThemeActive = useCallback((active: boolean) => {
+    if (loginThemeActive.current === active) return
+    loginThemeActive.current = active
+    window.dispatchEvent(new Event('account-theme-refresh'))
+  }, [])
 
   async function refreshTheme() {
+    const requestId = ++latestRequest.current
     const path = window.location.pathname
     const activity = path.match(/^\/poll\/([^/]+)(?:\/(?:display|monitor))?\/?$/)
       || path.match(/^\/(raffle|scramble)\/join\/([^/]+)\/?$/)
@@ -81,7 +91,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const selfieJoin = path.match(/^\/selfie\/join\/([A-Za-z0-9_-]+)\/?$/)
     const selfieDisplay = path.match(/^\/selfie\/display\/([A-Za-z0-9_-]+)\/?$/)
     const params = new URLSearchParams()
-    if (activity) {
+    if (loginThemeActive.current) {
+      params.set('kind', 'login')
+    } else if (activity) {
       const kind = activity.length === 2 ? 'poll' : activity[1]
       params.set('kind', kind)
       params.set('id', decodeURIComponent(activity[activity.length - 1]))
@@ -96,6 +108,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const response = await fetch(`/api/theme${params.size ? `?${params}` : ''}`, { cache: 'no-store', headers: displayToken ? { 'X-Selfie-Display-Token': displayToken } : undefined })
     if (!response.ok) throw new Error('The published theme could not be loaded.')
     const result: { config: ThemeConfig; assetUrls: Record<string, string> } = await response.json()
+    if (requestId !== latestRequest.current) return
     setTheme(result.config)
     if (result.config.skin) window.localStorage.setItem('theme-skin', result.config.skin)
     setAssetUrls(result.assetUrls)
@@ -146,7 +159,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   ].filter(Boolean).join(' ')
 
   return (
-    <ThemeContext.Provider value={{ theme, assetUrls, refreshTheme }}>
+    <ThemeContext.Provider value={{ theme, assetUrls, refreshTheme, setLoginThemeActive }}>
       <div className={rootClasses} style={style}>
         {children}
       </div>

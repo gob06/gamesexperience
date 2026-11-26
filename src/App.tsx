@@ -39,7 +39,7 @@ import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLib
 import SelfieCam, { SelfieParticipant } from './SelfieCam'
 import SelfieDisplay from './SelfieDisplay'
 import SelfieMonitor from './SelfieMonitor'
-import { ThemeBrand } from './theme'
+import { ThemeBrand, useTheme } from './theme'
 import VanishingGame from './VanishingGame'
 import { RaffleDisplayPage, RaffleHostPage, RaffleJoinPage } from './Raffle'
 import { ScrambleDisplayPage, ScrambleHostPage, ScrambleJoinPage } from './Scramble'
@@ -1311,10 +1311,16 @@ function AuthLoading() {
 }
 
 function LoginPage({ setupRequired = false, initialError = '', onAuthenticated }: { setupRequired?: boolean; initialError?: string; onAuthenticated: (user: AuthUser) => void }) {
+  const { setLoginThemeActive } = useTheme()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(initialError)
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    setLoginThemeActive(true)
+    return () => setLoginThemeActive(false)
+  }, [setLoginThemeActive])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

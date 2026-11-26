@@ -43,6 +43,9 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
   const request = (url, cookie, options = {}) => fetch(`${base}${url}`, { ...options, headers: { ...(cookie ? { Cookie: cookie } : {}), ...options.headers } })
   const json = () => ({ 'Content-Type': 'application/json' })
   const password = randomBytes(24).toString('hex')
+  const setupTheme = await request('/api/theme?kind=login', '')
+  assert.equal(setupTheme.status, 200)
+  assert.equal((await setupTheme.json()).config.eventTitle, (await (await request('/api/theme', '')).json()).config.eventTitle)
   const setup = await request('/api/auth/setup', '', { method: 'POST', headers: json(), body: JSON.stringify({ username: 'admin', password }) })
   assert.equal(setup.status, 201)
   const superCookie = setup.headers.get('set-cookie').split(';')[0]
@@ -133,6 +136,29 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
   assert.equal((await (await request('/api/theme', hostCookie)).json()).config.eventTitle, 'Host appearance')
   assert.equal((await request(`/api/theme/assets/${themeImage.id}`, '')).status, 200)
   assert.notEqual((await (await request('/api/theme', superCookie)).json()).config.eventTitle, 'Host appearance')
+  const superImageForm = new FormData()
+  superImageForm.append('image', new Blob([image], { type: 'image/png' }), 'login.png')
+  const superUpload = await request('/api/admin/theme/assets', superCookie, { method: 'POST', body: superImageForm })
+  assert.equal(superUpload.status, 201)
+  const superImage = (await superUpload.json()).asset
+  const superTheme = await (await request('/api/admin/theme', superCookie)).json()
+  superTheme.draft.eventTitle = 'Login appearance'
+  superTheme.draft.assets.logo = superImage.id
+  assert.equal((await request('/api/admin/theme/draft', superCookie, { method: 'PUT', headers: json(), body: JSON.stringify(superTheme.draft) })).status, 200)
+  assert.notEqual((await (await request('/api/theme?kind=login', '')).json()).config.eventTitle, 'Login appearance')
+  assert.equal((await request(`/api/theme/assets/${superImage.id}`, '')).status, 404)
+  assert.equal((await request('/api/admin/theme/publish', superCookie, { method: 'POST' })).status, 200)
+  for (const cookie of ['', hostCookie]) {
+    const loginTheme = await request('/api/theme?kind=login', cookie)
+    assert.equal(loginTheme.headers.get('cache-control'), 'no-store')
+    const loginAppearance = await loginTheme.json()
+    assert.equal(loginAppearance.config.eventTitle, 'Login appearance')
+    assert.equal(loginAppearance.assetUrls.logo, `/api/theme/assets/${superImage.id}`)
+  }
+  assert.equal((await request(`/api/theme/assets/${superImage.id}`, '')).status, 200)
+  assert.notEqual((await (await request('/api/theme', '')).json()).config.eventTitle, 'Login appearance')
+  assert.equal((await (await request('/api/theme', hostCookie)).json()).config.eventTitle, 'Host appearance')
+  assert.equal((await request('/api/theme?kind=login&id=unexpected', '')).status, 400)
   for (const [kind, id] of [['poll', poll.id], ['raffle', raffle.id], ['scramble', scramble.id], ['selfie-join', selfie.joinToken]]) {
     assert.equal((await (await request(`/api/theme?kind=${kind}&id=${id}`, '')).json()).config.eventTitle, 'Host appearance')
   }
