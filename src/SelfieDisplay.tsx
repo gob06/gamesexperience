@@ -145,8 +145,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
     preload.src = imageUrl(currentId)
     // Never stay blank if the image is slow to load.
     const fallback = window.setTimeout(show, 1000)
-    const trim = window.setTimeout(() => { if (active) setLayers((value) => value.slice(-1)) }, 4600)
-    return () => { active = false; window.clearTimeout(trim); window.clearTimeout(fallback) }
+    return () => { active = false; window.clearTimeout(fallback) }
   }, [currentId, sessionId, displayToken])
 
   useEffect(() => {
@@ -164,7 +163,12 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
           <p className="selfie-display-empty">{error || (closed ? 'This selfie session has ended.' : 'Photos will appear here as guests send them.')}</p>
         ) : (
           layers.map((id) => (
-            <div className="selfie-slide" key={id}>
+            <div className="selfie-slide" key={id} onAnimationEnd={(event) => {
+              if (event.target === event.currentTarget && event.animationName === 'selfie-crossfade') {
+                setLayers((value) => value[value.length - 1] === id ? value.slice(-1) : value)
+              }
+            }}>
+              <img className="selfie-slide-backdrop" src={imageUrl(id)} alt="" aria-hidden="true" />
               <img className="selfie-slide-photo audience-submitted-image" src={imageUrl(id)} alt="Guest photo" />
             </div>
           ))
