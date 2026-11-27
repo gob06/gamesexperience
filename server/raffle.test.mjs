@@ -97,13 +97,16 @@ test('raffle draws persist the requested number of distinct winners and expose t
   }
   const form = new FormData()
   form.append('title', 'Multi-winner raffle')
+  form.append('ticketLabel', 'Employee ID')
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aXcAAAAASUVORK5CYII=', 'base64')
   for (const field of ['logo', 'displayImage1', 'displayImage2']) form.append(field, new Blob([png], { type: 'image/png' }), `${field}.png`)
   const created = await fetch(`${base}/api/raffles`, { method: 'POST', headers: { Cookie: cookie }, body: form })
   assert.equal(created.status, 201)
   const raffle = await created.json()
   assert.equal(raffle.drawWinnerCount, 1)
+  assert.equal(raffle.ticketLabel, 'Employee ID')
   const url = `/api/raffles/${raffle.id}`
+  assert.equal((await (await fetch(`${base}${url}`)).json()).ticketLabel, 'Employee ID')
   const display = async () => {
     const response = await fetch(`${base}${url}/display`)
     assert.equal(response.status, 200)
@@ -111,7 +114,9 @@ test('raffle draws persist the requested number of distinct winners and expose t
     return response.json()
   }
   const host = async () => (await fetch(`${base}${url}/host`, { headers: { Cookie: cookie } })).json()
-  assert.deepEqual((await display()).latestWinners, [])
+  const initialDisplay = await display()
+  assert.equal(initialDisplay.raffle.ticketLabel, 'Employee ID')
+  assert.deepEqual(initialDisplay.latestWinners, [])
   for (let index = 1; index <= 6; index++) {
     assert.equal((await post(`${url}/register`, { participantName: `Guest ${index}`, ticketNumber: `T-${index}` }, false)).status, 201)
   }

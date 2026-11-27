@@ -20,6 +20,7 @@ const port = Number.isInteger(envPort) && envPort > 0 && envPort !== nginxPort
   ? envPort
   : Number(process.env.DEFAULT_APP_PORT || 3000)
 const themeImageMaxBytes = Number(process.env.THEME_IMAGE_MAX_BYTES || 50 * 1024 * 1024)
+const themeFontMaxBytes = Number(process.env.THEME_FONT_MAX_BYTES || 20 * 1024 * 1024)
 const adVideoMaxBytes = Number(process.env.AD_VIDEO_MAX_BYTES || 200 * 1024 * 1024)
 if (!Number.isSafeInteger(adVideoMaxBytes) || adVideoMaxBytes < 1 || adVideoMaxBytes > 1024 * 1024 * 1024) {
   throw new Error('AD_VIDEO_MAX_BYTES must be between 1 byte and 1 GB.')
@@ -32,6 +33,9 @@ const trustedProxyHops = Number.isSafeInteger(parsedTrustProxy) && parsedTrustPr
   : 0
 if (!Number.isSafeInteger(themeImageMaxBytes) || themeImageMaxBytes < 1 || themeImageMaxBytes > 200 * 1024 * 1024) {
   throw new Error('THEME_IMAGE_MAX_BYTES must be between 1 byte and 200 MB.')
+}
+if (!Number.isSafeInteger(themeFontMaxBytes) || themeFontMaxBytes < 1 || themeFontMaxBytes > 200 * 1024 * 1024) {
+  throw new Error('THEME_FONT_MAX_BYTES must be between 1 byte and 200 MB.')
 }
 if (!Number.isSafeInteger(votingSessionDurationSeconds) || votingSessionDurationSeconds < 60 || votingSessionDurationSeconds > 90 * 24 * 60 * 60) {
   throw new Error('VOTING_SESSION_DURATION_SECONDS must be between 60 seconds and 90 days.')
@@ -86,6 +90,11 @@ const themeImageUpload = multer({
   limits: { fileSize: themeImageMaxBytes, files: 1 },
 })
 
+const themeFontUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: themeFontMaxBytes, files: 1 },
+})
+
 app.get('/api/network-addresses', (_request, response) => {
   const addresses = Object.values(networkInterfaces())
     .flatMap((interfaces) => interfaces ?? [])
@@ -96,14 +105,14 @@ app.get('/api/network-addresses', (_request, response) => {
   response.json({ addresses })
 })
 
-const selectPoll = database.prepare("SELECT id, question, join_title AS joinTitle, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/logo') END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/question-image') END AS questionImageUrl FROM polls WHERE id = ?")
+const selectPoll = database.prepare("SELECT id, question, join_title AS joinTitle, ticket_label AS ticketLabel, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, owner_user_id AS ownerUserId, CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/logo') END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/question-image') END AS questionImageUrl FROM polls WHERE id = ?")
 const selectQaWinner = database.prepare('SELECT v.voter_id AS voterId, v.first_name AS firstName, v.ticket_number AS ticketNumber, o.label AS answer FROM poll_voters v JOIN poll_options o ON o.id = v.option_id WHERE v.poll_id = ? AND v.is_correct = 1 ORDER BY v.created_at, v.seq LIMIT 1')
 const selectQaStats = database.prepare('SELECT (SELECT COUNT(*) FROM poll_voting_sessions WHERE poll_id = ? AND ticket_key IS NOT NULL) AS participants, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND option_id IS NOT NULL) AS submissions, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND is_correct = 1) AS winners')
 const selectOptions = database.prepare("SELECT id, label, votes, hide_label AS hideLabel, CASE WHEN image IS NULL THEN NULL ELSE CONCAT('/api/poll-options/', id, '/image') END AS imageUrl FROM poll_options WHERE poll_id = ? ORDER BY `position`")
 
 // The correct answer, winners, and statistics are only included for signed-in hosts (admin = true); audience requests never see them.
 async function getPoll(id, { admin = false } = {}) {
-  const { correctOptionId, revealCorrect, ...poll } = (await selectPoll.get(id)) ?? {}
+  const { correctOptionId, revealCorrect, ownerUserId: _ownerUserId, ...poll } = (await selectPoll.get(id)) ?? {}
   if (!poll.id) return null
   const base = { ...poll, isQa: Boolean(poll.isQa), votingEnabled: Boolean(poll.votingEnabled), videoEnabled: Boolean(poll.videoEnabled), options: await selectOptions.all(id) }
   if (!admin || !base.isQa) return base
@@ -131,14 +140,99 @@ function hasValidImageSignature(mimeType, image) {
   return mimeType === 'image/webp' && signature.toString('ascii', 0, 4) === 'RIFF' && signature.toString('ascii', 8, 12) === 'WEBP'
 }
 
+function fontCssFormat(mimeType) {
+  return {
+    'font/woff2': 'woff2',
+    'font/woff': 'woff',
+    'font/ttf': 'truetype',
+    'font/otf': 'opentype',
+    'font/collection': 'collection',
+    'application/vnd.ms-fontobject': 'embedded-opentype',
+  }[mimeType] || ''
+}
+
+function sanitizeAssetName(originalname, fallback = 'Custom font') {
+  const base = path.basename(String(originalname || '').trim()).replace(/[\u0000-\u001f\u007f<>:"/\\|?*`$;]/g, ' ').replace(/\s+/g, ' ').trim()
+  return (base || fallback).slice(0, 120)
+}
+
+function detectFontAsset(buffer, originalname = '') {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return null
+  const tag = buffer.subarray(0, 4).toString('ascii')
+  const lowerName = String(originalname || '').toLowerCase()
+
+  if (tag === 'wOF2' && buffer.length >= 48) {
+    return { mimeType: 'font/woff2', extension: '.woff2', format: 'woff2' }
+  }
+  if (tag === 'wOFF' && buffer.length >= 44) {
+    return { mimeType: 'font/woff', extension: '.woff', format: 'woff' }
+  }
+  if (tag === 'OTTO') {
+    const numTables = buffer.readUInt16BE(4)
+    if (numTables >= 1 && numTables <= 1024 && buffer.length >= 12 + numTables * 16) {
+      return { mimeType: 'font/otf', extension: '.otf', format: 'opentype' }
+    }
+    return null
+  }
+  if (buffer.subarray(0, 4).equals(Buffer.from([0x00, 0x01, 0x00, 0x00])) || tag === 'true' || tag === 'typ1') {
+    const numTables = buffer.readUInt16BE(4)
+    if (numTables >= 1 && numTables <= 1024 && buffer.length >= 12 + numTables * 16) {
+      return { mimeType: 'font/ttf', extension: lowerName.endsWith('.sfnt') ? '.sfnt' : '.ttf', format: 'truetype' }
+    }
+    return null
+  }
+  if (tag === 'ttcf' && buffer.length >= 16) {
+    const numFonts = buffer.readUInt32BE(8)
+    if (numFonts >= 1 && numFonts <= 256 && buffer.length >= 12 + numFonts * 4) {
+      return { mimeType: 'font/collection', extension: lowerName.endsWith('.otc') ? '.otc' : '.ttc', format: 'collection' }
+    }
+    return null
+  }
+  if (buffer.length >= 82 && buffer[34] === 0x4c && buffer[35] === 0x50) {
+    const version = buffer.readUInt32LE(8)
+    if ([0x00010000, 0x00020001, 0x00020002].includes(version)) {
+      return { mimeType: 'application/vnd.ms-fontobject', extension: '.eot', format: 'embedded-opentype' }
+    }
+  }
+  return null
+}
+
 const themeSkins = ['broadcast', 'classic']
+const displayKeys = ['poll', 'qa', 'raffle', 'scramble', 'selfie', 'game']
+const defaultThemeColors = { primary: '#f4cf51', secondary: '#ff657a', accent: '#68ceda', background: '#131317', text: '#f5f1ed' }
+const defaultThemeBackground = { position: 'center', size: 'cover', repeat: 'no-repeat', opacity: 1, overlay: 0.35, borderRadius: 8, glow: 0.2 }
+
+function createDefaultDisplayConfig() {
+  return {
+    customized: false,
+    skin: 'inherit',
+    colors: { ...defaultThemeColors },
+    background: { ...defaultThemeBackground },
+  }
+}
 
 const defaultTheme = {
   eventTitle: 'VOTE',
   skin: 'broadcast',
-  assets: { logo: null, banner: null, background: null, votingBackground: null, resultsBackground: null, adminBackground: null },
-  colors: { primary: '#f4cf51', secondary: '#ff657a', accent: '#68ceda', background: '#131317', text: '#f5f1ed' },
-  background: { position: 'center', size: 'cover', repeat: 'no-repeat', opacity: 1, overlay: 0.35, borderRadius: 8, glow: 0.2 },
+  assets: {
+    logo: null,
+    banner: null,
+    background: null,
+    guestRegistrationBackground: null,
+    votingBackground: null,
+    resultsBackground: null,
+    qaDisplayBackground: null,
+    raffleDisplayBackground: null,
+    scrambleDisplayBackground: null,
+    selfieSubmissionBackground: null,
+    selfieDisplayBackground: null,
+    gameDisplayBackground: null,
+    adminBackground: null,
+  },
+  fonts: { bodyFont: null, headingFont: null },
+  colors: { ...defaultThemeColors },
+  background: { ...defaultThemeBackground },
+  displays: Object.fromEntries(displayKeys.map((key) => [key, createDefaultDisplayConfig()])),
 }
 
 await database.prepare(`
@@ -157,7 +251,7 @@ await database.prepare(`
 
 const selectThemeSettings = database.prepare('SELECT draft_json AS draft, published_json AS published, updated_by AS updatedBy, updated_at AS updatedAt, published_by AS publishedBy, published_at AS publishedAt FROM theme_settings WHERE id = 1')
 const selectGameThemeSettings = database.prepare('SELECT draft_json AS draft, published_json AS published, updated_by AS updatedBy, updated_at AS updatedAt, published_by AS publishedBy, published_at AS publishedAt FROM game_theme_settings WHERE id = 1')
-const selectThemeAsset = database.prepare('SELECT id, mime_type AS mimeType, size_bytes AS sizeBytes, width, height, uploaded_at AS uploadedAt FROM theme_assets WHERE id = ?')
+const selectThemeAsset = database.prepare("SELECT id, mime_type AS mimeType, size_bytes AS sizeBytes, width, height, COALESCE(asset_kind, 'image') AS assetKind, original_name AS originalName, uploaded_at AS uploadedAt FROM theme_assets WHERE id = ?")
 
 function parseThemeJson(json) {
   try {
@@ -168,16 +262,97 @@ function parseThemeJson(json) {
   }
 }
 
+function normalizeDisplayOverride(raw) {
+  const base = createDefaultDisplayConfig()
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base
+  const skin = ['inherit', ...themeSkins].includes(raw.skin) ? raw.skin : 'inherit'
+  const rawBackground = raw.background && typeof raw.background === 'object' && !Array.isArray(raw.background) ? raw.background : {}
+  const size = ['cover', 'contain', 'repeat'].includes(rawBackground.size) ? rawBackground.size : base.background.size
+  return {
+    customized: Boolean(raw.customized),
+    skin,
+    colors: { ...base.colors, ...(raw.colors && typeof raw.colors === 'object' && !Array.isArray(raw.colors) ? raw.colors : {}) },
+    background: {
+      ...base.background,
+      ...rawBackground,
+      size,
+      repeat: size === 'repeat' ? 'repeat' : 'no-repeat',
+    },
+  }
+}
+
 function getThemeConfig(json) {
   const parsed = parseThemeJson(json)
+  const parsedDisplays = parsed.displays && typeof parsed.displays === 'object' && !Array.isArray(parsed.displays) ? parsed.displays : {}
   return {
     ...defaultTheme,
     ...parsed,
     skin: themeSkins.includes(parsed.skin) ? parsed.skin : defaultTheme.skin,
     assets: { ...defaultTheme.assets, ...(parsed.assets || {}) },
+    fonts: { ...defaultTheme.fonts, ...(parsed.fonts || {}) },
     colors: { ...defaultTheme.colors, ...(parsed.colors || {}) },
     background: { ...defaultTheme.background, ...(parsed.background || {}) },
+    displays: Object.fromEntries(displayKeys.map((key) => [key, normalizeDisplayOverride(parsedDisplays[key])])),
   }
+}
+
+function validateAndNormalizeDisplays(displays) {
+  if (displays === undefined) {
+    return { ok: true, value: Object.fromEntries(displayKeys.map((key) => [key, createDefaultDisplayConfig()])) }
+  }
+  if (!displays || typeof displays !== 'object' || Array.isArray(displays)) {
+    return { ok: false, error: 'Display customization settings are invalid.' }
+  }
+  const colorKeys = Object.keys(defaultThemeColors)
+  const normalized = {}
+  for (const key of displayKeys) {
+    const entry = displays[key]
+    if (entry === undefined) {
+      normalized[key] = createDefaultDisplayConfig()
+      continue
+    }
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return { ok: false, error: `Invalid display customization settings for ${key}.` }
+    }
+    if (entry.customized !== undefined && typeof entry.customized !== 'boolean') {
+      return { ok: false, error: `Invalid display override toggle for ${key}.` }
+    }
+    const skin = entry.skin === undefined ? 'inherit' : entry.skin
+    if (!['inherit', ...themeSkins].includes(skin)) {
+      return { ok: false, error: `Invalid display theme skin for ${key}.` }
+    }
+    const colors = entry.colors
+    if (!colors || typeof colors !== 'object' || Array.isArray(colors) || colorKeys.some((colorKey) => typeof colors[colorKey] !== 'string' || !/^#[0-9a-f]{6}$/i.test(colors[colorKey]))) {
+      return { ok: false, error: `Display colors for ${key} must be valid six-digit hex colors.` }
+    }
+    const bg = entry.background
+    if (
+      !bg || typeof bg !== 'object' || Array.isArray(bg)
+      || !['cover', 'contain', 'repeat'].includes(bg.size)
+      || !['center', 'top', 'bottom', 'left', 'right'].includes(bg.position)
+      || typeof bg.opacity !== 'number' || bg.opacity < 0 || bg.opacity > 1
+      || typeof bg.overlay !== 'number' || bg.overlay < 0 || bg.overlay > 0.9
+      || typeof bg.borderRadius !== 'number' || bg.borderRadius < 0 || bg.borderRadius > 32
+      || typeof bg.glow !== 'number' || bg.glow < 0 || bg.glow > 1
+    ) {
+      return { ok: false, error: `Display layout settings for ${key} are invalid.` }
+    }
+    normalized[key] = {
+      customized: Boolean(entry.customized),
+      skin,
+      colors: Object.fromEntries(colorKeys.map((colorKey) => [colorKey, colors[colorKey].toLowerCase()])),
+      background: {
+        position: bg.position,
+        size: bg.size,
+        repeat: bg.size === 'repeat' ? 'repeat' : 'no-repeat',
+        opacity: bg.opacity,
+        overlay: bg.overlay,
+        borderRadius: bg.borderRadius,
+        glow: bg.glow,
+      },
+    }
+  }
+  return { ok: true, value: normalized }
 }
 
 function auditThemeChange(user, action, details = {}) {
@@ -190,12 +365,15 @@ function auditGameThemeChange(user, action, details = {}) {
     .run(randomUUID(), user.id, user.username, `game-theme.${action}`, JSON.stringify(details), new Date().toISOString())
 }
 
-async function themeAssetsAreValid(assets, keys, userId = null) {
-  if (!assets) return false
+async function themeAssetsAreValid(assets, keys, userId = null, expectedKind = null) {
+  if (!assets || typeof assets !== 'object' || Array.isArray(assets)) return false
   for (const key of keys) {
     const value = assets[key]
-    if (value === null) continue
-    if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value) || !(await selectThemeAsset.get(value))) return false
+    if (value === null || value === undefined) continue
+    if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value)) return false
+    const asset = await selectThemeAsset.get(value)
+    if (!asset) return false
+    if (expectedKind && asset.assetKind !== expectedKind) return false
     if (userId && !(await database.prepare('SELECT asset_id FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').get(userId, value))) return false
   }
   return true
@@ -248,7 +426,21 @@ async function getPublicTheme(userId = null) {
   for (const [key, id] of Object.entries(config.assets)) {
     if (typeof id === 'string' && await selectThemeAsset.get(id)) assetUrls[key] = `/api/theme/assets/${encodeURIComponent(id)}`
   }
-  return { config, assetUrls }
+  const fontAssets = {}
+  for (const [key, id] of Object.entries(config.fonts)) {
+    if (typeof id !== 'string') continue
+    const asset = await selectThemeAsset.get(id)
+    if (asset && asset.assetKind === 'font') {
+      fontAssets[key] = {
+        id,
+        url: `/api/theme/assets/${encodeURIComponent(id)}`,
+        mimeType: asset.mimeType,
+        format: fontCssFormat(asset.mimeType),
+        name: asset.originalName || 'Custom font',
+      }
+    }
+  }
+  return { config, assetUrls, fontAssets }
 }
 
 async function getPublicGameTheme() {
@@ -258,7 +450,21 @@ async function getPublicGameTheme() {
   for (const [key, id] of Object.entries(config.assets)) {
     if (typeof id === 'string' && await selectThemeAsset.get(id)) assetUrls[key] = `/api/game-theme/assets/${encodeURIComponent(id)}`
   }
-  return { config, assetUrls }
+  const fontAssets = {}
+  for (const [key, id] of Object.entries(config.fonts)) {
+    if (typeof id !== 'string') continue
+    const asset = await selectThemeAsset.get(id)
+    if (asset && asset.assetKind === 'font') {
+      fontAssets[key] = {
+        id,
+        url: `/api/game-theme/assets/${encodeURIComponent(id)}`,
+        mimeType: asset.mimeType,
+        format: fontCssFormat(asset.mimeType),
+        name: asset.originalName || 'Custom font',
+      }
+    }
+  }
+  return { config, assetUrls, fontAssets }
 }
 
 const sessionDurationSeconds = 60 * 60 * 24 * 7
@@ -415,6 +621,24 @@ async function migrateAccountOwnership() {
 
 await migrateAccountOwnership()
 
+async function migrateAdVideoOwnership() {
+  await inTransaction(async () => {
+    if (await database.prepare('SELECT id FROM account_migrations WHERE id = ?').get('account-ad-videos-v1')) return
+    const owner = await database.prepare("SELECT id FROM users WHERE is_superadmin = 1 OR role = 'admin' ORDER BY is_superadmin DESC, created_at, id LIMIT 1").get()
+    if (!owner) return
+    for (const table of ['ad_videos', 'raffle_ad_videos', 'scramble_ad_videos']) {
+      await database.prepare(`
+        INSERT IGNORE INTO account_ad_videos (user_id, kind, file_name, original_name, mime_type, size, updated_at)
+        SELECT ?, kind, file_name, original_name, mime_type, size, updated_at FROM ${table}
+      `).run(owner.id)
+    }
+    await database.prepare('UPDATE game_rooms SET owner_user_id = ? WHERE owner_user_id IS NULL').run(owner.id)
+    await database.prepare('INSERT INTO account_migrations (id) VALUES (?)').run('account-ad-videos-v1')
+  })
+}
+
+await migrateAdVideoOwnership()
+
 app.get('/api/auth/status', async (request, response) => {
   const userCount = (await database.prepare('SELECT count(*) AS count FROM users').get()).count
   response.json({ setupRequired: userCount === 0, user: await getCurrentUser(request) })
@@ -438,6 +662,7 @@ app.post('/api/auth/setup', async (request, response) => {
   }
   if (!user) return response.status(409).json({ error: 'Initial setup has already been completed.' })
   await migrateAccountOwnership()
+  await migrateAdVideoOwnership()
   await setSessionCookie(request, response, user.id)
   response.status(201).json({ user })
 })
@@ -559,12 +784,13 @@ app.post('/api/games', requireAdmin, imageUpload.fields([{ name: 'xImage', maxCo
     if (activeCount >= activeRoomLimit) return false
     await database.prepare(`
       INSERT INTO game_rooms
-        (id, room_name, player_x_token_hash, player_x_name, status, board_json, history_x_json, history_o_json,
+        (id, room_name, owner_user_id, player_x_token_hash, player_x_name, status, board_json, history_x_json, history_o_json,
           next_player, x_image_mime_type, x_image, o_image_mime_type, o_image, updated_at)
-      VALUES (?, ?, '', 'Waiting for Player X', 'waiting', ?, '[]', '[]', 'X', ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, '', 'Waiting for Player X', 'waiting', ?, '[]', '[]', 'X', ?, ?, ?, ?, ?)
     `).run(
       id,
       roomName,
+      request.user.id,
       JSON.stringify(Array(9).fill(null)),
       xImage?.mimetype || null,
       xImage?.buffer || null,
@@ -783,6 +1009,7 @@ app.get('/api/theme', async (request, response) => {
     if (kind === 'poll') row = await database.prepare('SELECT owner_user_id AS ownerId FROM polls WHERE id = ?').get(id)
     else if (kind === 'raffle') row = await database.prepare('SELECT created_by AS ownerId FROM raffle_sessions WHERE id = ?').get(id)
     else if (kind === 'scramble') row = await database.prepare('SELECT created_by AS ownerId FROM scramble_games WHERE id = ?').get(id)
+    else if (kind === 'game') row = await database.prepare('SELECT owner_user_id AS ownerId FROM game_rooms WHERE id = ?').get(id)
     else if (kind === 'selfie-join' && /^[A-Za-z0-9_-]{43}$/.test(id)) {
       const session = await getSelfieSessionForJoin(id)
       if (session) row = await database.prepare('SELECT owner_user_id AS ownerId FROM selfie_sessions WHERE id = ?').get(session.id)
@@ -808,7 +1035,7 @@ app.get('/api/game-theme', async (_request, response) => response.json(await get
 
 app.get('/api/game-theme/assets/:id', async (request, response) => {
   const theme = await getPublicGameTheme()
-  if (!Object.values(theme.config.assets).includes(request.params.id)) return response.status(404).end()
+  if (![...Object.values(theme.config.assets), ...Object.values(theme.config.fonts)].includes(request.params.id)) return response.status(404).end()
   const asset = await selectThemeAsset.get(request.params.id)
   if (!asset) return response.status(404).end()
   const file = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
@@ -817,8 +1044,11 @@ app.get('/api/game-theme/assets/:id', async (request, response) => {
 
 app.get('/api/admin/game-theme', requireAdmin, async (request, response) => {
   const settings = await selectGameThemeSettings.get()
-  const owned = await database.prepare('SELECT a.id, a.mime_type AS mimeType, a.size_bytes AS sizeBytes, a.width, a.height, a.uploaded_at AS uploadedAt FROM theme_assets a JOIN account_theme_assets aa ON aa.asset_id = a.id WHERE aa.user_id = ? ORDER BY a.uploaded_at DESC').all(request.user.id)
-  const sharedIds = new Set([settings.draft, settings.published].flatMap((json) => Object.values(getThemeConfig(json).assets)).filter((id) => typeof id === 'string'))
+  const owned = await database.prepare("SELECT a.id, a.mime_type AS mimeType, a.size_bytes AS sizeBytes, a.width, a.height, COALESCE(a.asset_kind, 'image') AS assetKind, a.original_name AS originalName, a.uploaded_at AS uploadedAt FROM theme_assets a JOIN account_theme_assets aa ON aa.asset_id = a.id WHERE aa.user_id = ? ORDER BY a.uploaded_at DESC").all(request.user.id)
+  const sharedIds = new Set([settings.draft, settings.published].flatMap((json) => {
+    const c = getThemeConfig(json)
+    return [...Object.values(c.assets), ...Object.values(c.fonts)]
+  }).filter((id) => typeof id === 'string'))
   for (const id of sharedIds) {
     if (!owned.some((asset) => asset.id === id)) {
       const asset = await selectThemeAsset.get(id)
@@ -830,6 +1060,7 @@ app.get('/api/admin/game-theme', requireAdmin, async (request, response) => {
     published: getThemeConfig(settings.published),
     draftAssets: owned,
     maxUploadBytes: themeImageMaxBytes,
+    maxFontUploadBytes: themeFontMaxBytes,
     updatedAt: settings.updatedAt,
     publishedAt: settings.publishedAt,
   })
@@ -838,19 +1069,26 @@ app.get('/api/admin/game-theme', requireAdmin, async (request, response) => {
 app.put('/api/admin/game-theme/draft', requireAdmin, async (request, response) => {
   const config = request.body
   const assetKeys = Object.keys(defaultGameTheme.assets)
+  const fontKeys = Object.keys(defaultGameTheme.fonts)
   const colorKeys = Object.keys(defaultGameTheme.colors)
   const background = config?.background
   if (!config || typeof config !== 'object' || Array.isArray(config) || typeof config.eventTitle !== 'string' || config.eventTitle.trim().length < 1 || config.eventTitle.trim().length > 80) {
     return response.status(400).json({ error: 'Enter a game title between 1 and 80 characters.' })
   }
-  if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys))) {
+  if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys, null, 'image'))) {
     return response.status(400).json({ error: 'Choose valid uploaded images for the game theme.' })
   }
+  if (config.fonts !== undefined && !(await themeAssetsAreValid(config.fonts, fontKeys, null, 'font'))) {
+    return response.status(400).json({ error: 'Choose valid uploaded fonts for the game theme.' })
+  }
   const currentGameTheme = await selectGameThemeSettings.get()
-  const sharedIds = new Set([currentGameTheme.draft, currentGameTheme.published].flatMap((json) => Object.values(getThemeConfig(json).assets)))
-  for (const id of Object.values(config.assets)) {
-    if (id !== null && !sharedIds.has(id) && !(await database.prepare('SELECT asset_id FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').get(request.user.id, id))) {
-      return response.status(400).json({ error: 'Choose valid uploaded images for the game theme.' })
+  const sharedIds = new Set([currentGameTheme.draft, currentGameTheme.published].flatMap((json) => {
+    const c = getThemeConfig(json)
+    return [...Object.values(c.assets), ...Object.values(c.fonts)]
+  }))
+  for (const id of [...Object.values(config.assets), ...Object.values(config.fonts || {})]) {
+    if (id != null && !sharedIds.has(id) && !(await database.prepare('SELECT asset_id FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').get(request.user.id, id))) {
+      return response.status(400).json({ error: 'Choose valid uploaded assets for the game theme.' })
     }
   }
   if (!config.colors || colorKeys.some((key) => typeof config.colors[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(config.colors[key]))) {
@@ -860,9 +1098,15 @@ app.put('/api/admin/game-theme/draft', requireAdmin, async (request, response) =
     return response.status(400).json({ error: 'Game theme layout settings are invalid.' })
   }
 
+  const displaysValidation = validateAndNormalizeDisplays(config.displays)
+  if (!displaysValidation.ok) {
+    return response.status(400).json({ error: displaysValidation.error })
+  }
+
   const normalized = {
     eventTitle: config.eventTitle.trim(),
-    assets: Object.fromEntries(assetKeys.map((key) => [key, config.assets[key]])),
+    assets: Object.fromEntries(assetKeys.map((key) => [key, config.assets[key] ?? null])),
+    fonts: Object.fromEntries(fontKeys.map((key) => [key, config.fonts?.[key] ?? null])),
     colors: Object.fromEntries(colorKeys.map((key) => [key, config.colors[key].toLowerCase()])),
     background: {
       position: background.position,
@@ -873,6 +1117,7 @@ app.put('/api/admin/game-theme/draft', requireAdmin, async (request, response) =
       borderRadius: background.borderRadius,
       glow: background.glow,
     },
+    displays: displaysValidation.value,
   }
   const updatedAt = new Date().toISOString()
   await database.prepare('UPDATE game_theme_settings SET draft_json = ?, updated_by = ?, updated_at = ? WHERE id = 1')
@@ -906,7 +1151,12 @@ app.get('/api/admin/game-theme/audit', requireAdmin, async (_request, response) 
 app.get('/api/theme/assets/:id', async (request, response) => {
   const theme = await getPublicTheme()
   const accounts = await database.prepare('SELECT published_json AS published FROM account_theme_settings').all()
-  if (!Object.values(theme.config.assets).includes(request.params.id) && !accounts.some((settings) => Object.values(getThemeConfig(settings.published).assets).includes(request.params.id))) return response.status(404).end()
+  const isPublishedInGlobal = [...Object.values(theme.config.assets), ...Object.values(theme.config.fonts)].includes(request.params.id)
+  const isPublishedInAccount = accounts.some((settings) => {
+    const published = getThemeConfig(settings.published)
+    return [...Object.values(published.assets), ...Object.values(published.fonts)].includes(request.params.id)
+  })
+  if (!isPublishedInGlobal && !isPublishedInAccount) return response.status(404).end()
   const asset = await selectThemeAsset.get(request.params.id)
   if (!asset) return response.status(404).end()
   const file = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
@@ -919,8 +1169,9 @@ app.get('/api/admin/theme', requireUser, async (request, response) => {
   response.json({
     draft,
     published: getThemeConfig(settings.published),
-    draftAssets: await database.prepare('SELECT a.id, a.mime_type AS mimeType, a.size_bytes AS sizeBytes, a.width, a.height, a.uploaded_at AS uploadedAt FROM theme_assets a JOIN account_theme_assets aa ON aa.asset_id = a.id WHERE aa.user_id = ? ORDER BY a.uploaded_at DESC').all(request.user.id),
+    draftAssets: await database.prepare("SELECT a.id, a.mime_type AS mimeType, a.size_bytes AS sizeBytes, a.width, a.height, COALESCE(a.asset_kind, 'image') AS assetKind, a.original_name AS originalName, a.uploaded_at AS uploadedAt FROM theme_assets a JOIN account_theme_assets aa ON aa.asset_id = a.id WHERE aa.user_id = ? ORDER BY a.uploaded_at DESC").all(request.user.id),
     maxUploadBytes: themeImageMaxBytes,
+    maxFontUploadBytes: themeFontMaxBytes,
     updatedAt: settings.updatedAt,
     publishedAt: settings.publishedAt,
   })
@@ -930,7 +1181,7 @@ const themeUploadTimes = new Map()
 function limitThemeUploads(request, response, next) {
   const now = Date.now()
   const recent = (themeUploadTimes.get(request.user.id) || []).filter((time) => now - time < 10 * 60 * 1000)
-  if (recent.length >= 12) return response.status(429).json({ error: 'Upload limit reached. Try again in a few minutes.' })
+  if (recent.length >= 40) return response.status(429).json({ error: 'Upload limit reached. Try again in a few minutes.' })
   recent.push(now)
   themeUploadTimes.set(request.user.id, recent)
   next()
@@ -954,12 +1205,13 @@ app.post('/api/admin/theme/assets', requireUser, limitThemeUploads, themeImageUp
   const id = randomUUID()
   const extension = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[mimeType]
   const fileName = `${id}${extension}`
+  const originalName = sanitizeAssetName(file.originalname, 'Image')
   const uploadedAt = new Date().toISOString()
   try {
     writeFileSync(path.join(themeAssetsDirectory, fileName), file.buffer, { flag: 'wx' })
     await inTransaction(async () => {
-      await database.prepare('INSERT INTO theme_assets (id, file_name, mime_type, size_bytes, width, height, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(id, fileName, mimeType, file.size, dimensions.width, dimensions.height, request.user.id, uploadedAt)
+      await database.prepare('INSERT INTO theme_assets (id, file_name, mime_type, size_bytes, width, height, asset_kind, original_name, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, fileName, mimeType, file.size, dimensions.width, dimensions.height, 'image', originalName, request.user.id, uploadedAt)
       await database.prepare('INSERT INTO account_theme_assets (user_id, asset_id) VALUES (?, ?)').run(request.user.id, id)
     })
   } catch (error) {
@@ -968,16 +1220,48 @@ app.post('/api/admin/theme/assets', requireUser, limitThemeUploads, themeImageUp
     throw error
   }
   await auditThemeChange(request.user, 'asset.upload', { assetId: id, mimeType, sizeBytes: file.size, width: dimensions.width, height: dimensions.height })
-  response.status(201).json({ asset: { id, mimeType, sizeBytes: file.size, width: dimensions.width, height: dimensions.height, uploadedAt, url: `/api/admin/theme/assets/${encodeURIComponent(id)}` } })
+  response.status(201).json({ asset: { id, mimeType, sizeBytes: file.size, width: dimensions.width, height: dimensions.height, assetKind: 'image', originalName, uploadedAt, url: `/api/admin/theme/assets/${encodeURIComponent(id)}` } })
+})
+
+app.post('/api/admin/theme/fonts', requireUser, limitThemeUploads, themeFontUpload.single('font'), async (request, response) => {
+  const { file } = request
+  if (!file) return response.status(400).json({ error: 'Choose a font file to import.' })
+
+  const detected = detectFontAsset(file.buffer, file.originalname)
+  if (!detected) {
+    return response.status(400).json({ error: 'Upload a valid font file (TTF, OTF, WOFF, WOFF2, EOT, TTC, OTC, or SFNT).' })
+  }
+
+  const id = randomUUID()
+  const fileName = `${id}${detected.extension}`
+  const originalName = sanitizeAssetName(file.originalname, `Custom${detected.extension}`)
+  const uploadedAt = new Date().toISOString()
+  try {
+    writeFileSync(path.join(themeAssetsDirectory, fileName), file.buffer, { flag: 'wx' })
+    await inTransaction(async () => {
+      await database.prepare('INSERT INTO theme_assets (id, file_name, mime_type, size_bytes, width, height, asset_kind, original_name, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, fileName, detected.mimeType, file.size, 0, 0, 'font', originalName, request.user.id, uploadedAt)
+      await database.prepare('INSERT INTO account_theme_assets (user_id, asset_id) VALUES (?, ?)').run(request.user.id, id)
+    })
+  } catch (error) {
+    const filePath = path.join(themeAssetsDirectory, fileName)
+    if (existsSync(filePath)) unlinkSync(filePath)
+    throw error
+  }
+  await auditThemeChange(request.user, 'font.upload', { assetId: id, mimeType: detected.mimeType, sizeBytes: file.size, name: originalName })
+  response.status(201).json({ asset: { id, mimeType: detected.mimeType, sizeBytes: file.size, width: 0, height: 0, assetKind: 'font', originalName, uploadedAt, url: `/api/admin/theme/assets/${encodeURIComponent(id)}` } })
 })
 
 app.get('/api/admin/theme/assets/:id', requireUser, async (request, response) => {
   const owned = await database.prepare('SELECT asset_id FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').get(request.user.id, request.params.id)
   const game = request.user.role === 'admin' ? await selectGameThemeSettings.get() : null
-  const gameAssets = game ? [game.draft, game.published].flatMap((json) => Object.values(getThemeConfig(json).assets)) : []
-  if (!owned && !gameAssets.includes(request.params.id)) return response.status(404).json({ error: 'Theme image not found.' })
+  const gameAssets = game ? [game.draft, game.published].flatMap((json) => {
+    const c = getThemeConfig(json)
+    return [...Object.values(c.assets), ...Object.values(c.fonts)]
+  }) : []
+  if (!owned && !gameAssets.includes(request.params.id)) return response.status(404).json({ error: 'Theme asset not found.' })
   const asset = await selectThemeAsset.get(request.params.id)
-  if (!asset) return response.status(404).json({ error: 'Theme image not found.' })
+  if (!asset) return response.status(404).json({ error: 'Theme asset not found.' })
   const file = await database.prepare('SELECT file_name AS fileName FROM theme_assets WHERE id = ?').get(request.params.id)
   response.type(asset.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').sendFile(path.join(themeAssetsDirectory, file.fileName))
 })
@@ -985,13 +1269,16 @@ app.get('/api/admin/theme/assets/:id', requireUser, async (request, response) =>
 app.put('/api/admin/theme/draft', requireUser, async (request, response) => {
   const config = request.body
   const assetKeys = Object.keys(defaultTheme.assets)
+  const fontKeys = Object.keys(defaultTheme.fonts)
   const colorKeys = Object.keys(defaultTheme.colors)
-  const backgroundKeys = Object.keys(defaultTheme.background)
   if (!config || typeof config !== 'object' || Array.isArray(config) || typeof config.eventTitle !== 'string' || config.eventTitle.trim().length < 1 || config.eventTitle.trim().length > 80) {
     return response.status(400).json({ error: 'Enter an event title between 1 and 80 characters.' })
   }
-  if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys, request.user.id))) {
+  if (!config.assets || !(await themeAssetsAreValid(config.assets, assetKeys, request.user.id, 'image'))) {
     return response.status(400).json({ error: 'Choose valid uploaded images for the theme.' })
+  }
+  if (config.fonts !== undefined && !(await themeAssetsAreValid(config.fonts, fontKeys, request.user.id, 'font'))) {
+    return response.status(400).json({ error: 'Choose valid uploaded fonts for the theme.' })
   }
   if (!config.colors || colorKeys.some((key) => typeof config.colors[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(config.colors[key]))) {
     return response.status(400).json({ error: 'Theme colors must be valid six-digit hex colors.' })
@@ -1004,10 +1291,16 @@ app.put('/api/admin/theme/draft', requireUser, async (request, response) => {
     return response.status(400).json({ error: 'Theme layout settings are invalid.' })
   }
 
+  const displaysValidation = validateAndNormalizeDisplays(config.displays)
+  if (!displaysValidation.ok) {
+    return response.status(400).json({ error: displaysValidation.error })
+  }
+
   const normalized = {
     eventTitle: config.eventTitle.trim(),
     skin: config.skin,
-    assets: Object.fromEntries(assetKeys.map((key) => [key, config.assets[key]])),
+    assets: Object.fromEntries(assetKeys.map((key) => [key, config.assets[key] ?? null])),
+    fonts: Object.fromEntries(fontKeys.map((key) => [key, config.fonts?.[key] ?? null])),
     colors: Object.fromEntries(colorKeys.map((key) => [key, config.colors[key].toLowerCase()])),
     background: {
       position: background.position,
@@ -1018,6 +1311,7 @@ app.put('/api/admin/theme/draft', requireUser, async (request, response) => {
       borderRadius: background.borderRadius,
       glow: background.glow,
     },
+    displays: displaysValidation.value,
   }
   const updatedAt = new Date().toISOString()
   await accountTheme(request.user.id)
@@ -1047,11 +1341,14 @@ app.post('/api/admin/theme/reset', requireUser, async (_request, response) => {
 
 app.delete('/api/admin/theme/assets/:id', requireUser, async (request, response) => {
   const settings = await accountTheme(request.user.id)
-  if ([settings.draft, settings.published].some((json) => Object.values(getThemeConfig(json).assets).includes(request.params.id))) {
-    return response.status(409).json({ error: 'Remove this image from both the draft and published themes before deleting it.' })
+  if ([settings.draft, settings.published].some((json) => {
+    const c = getThemeConfig(json)
+    return [...Object.values(c.assets), ...Object.values(c.fonts)].includes(request.params.id)
+  })) {
+    return response.status(409).json({ error: 'Remove this asset from both the draft and published themes before deleting it.' })
   }
   const deleted = await database.prepare('DELETE FROM account_theme_assets WHERE user_id = ? AND asset_id = ?').run(request.user.id, request.params.id)
-  if (!deleted.changes) return response.status(404).json({ error: 'Theme image not found.' })
+  if (!deleted.changes) return response.status(404).json({ error: 'Theme asset not found.' })
   await auditThemeChange(request.user, 'asset.delete', { assetId: request.params.id })
   response.status(204).end()
 })
@@ -1072,7 +1369,7 @@ function getSelfieSessionForOwner(sessionId, user) {
 function getSelfieSessionForJoin(token) {
   const hash = hashSessionToken(token)
   return database.prepare(`
-    SELECT id, closed_at AS closedAt, paused, santa_enabled AS santaEnabled
+    SELECT id, owner_user_id AS ownerUserId, closed_at AS closedAt, paused, santa_enabled AS santaEnabled
     FROM selfie_sessions WHERE join_token_hash = ? OR live_join_token_hash = ? OR id IN (
       SELECT session_id FROM selfie_session_links WHERE join_token_hash = ?
     )
@@ -1501,19 +1798,23 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
     return response.status(400).json({ error: 'An option image is not a valid JPEG, PNG, or WebP image.' })
   }
 
+  const ticketLabel = isQa && typeof request.body.ticketLabel === 'string' ? request.body.ticketLabel.trim() : ''
+  if (ticketLabel.length > 40) {
+    return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
+  }
   const poll = { id: randomUUID(), question, createdAt: new Date().toISOString() }
   const optionsWithIds = options.map((option) => ({ ...option, id: randomUUID() }))
   const correctOptionId = optionsWithIds.find((option) => option.isCorrect)?.id || null
   await inTransaction(async () => {
-    await database.prepare('INSERT INTO polls (id, question, created_at, logo_mime_type, logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-              .run(poll.id, question, poll.createdAt, logoFile?.mimetype || null, logoFile?.buffer || null, Number(isQa), correctOptionId, questionImageFile?.mimetype || null, questionImageFile?.buffer || null, Number(isQa && request.body.revealCorrect === 'true'), request.user.id)
+    await database.prepare('INSERT INTO polls (id, question, ticket_label, created_at, logo_mime_type, logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+              .run(poll.id, question, ticketLabel || null, poll.createdAt, logoFile?.mimetype || null, logoFile?.buffer || null, Number(isQa), correctOptionId, questionImageFile?.mimetype || null, questionImageFile?.buffer || null, Number(isQa && request.body.revealCorrect === 'true'), request.user.id)
     const insertOption = database.prepare('INSERT INTO poll_options (id, poll_id, label, `position`, votes, image_mime_type, image, hide_label) VALUES (?, ?, ?, ?, 0, ?, ?, ?)')
     for (const [index, option] of optionsWithIds.entries()) {
       const file = option.imageIndex === null ? null : optionFiles[option.imageIndex]
       await insertOption.run(option.id, poll.id, option.label, index, file?.mimetype || null, file?.buffer || null, Number(option.hideLabel === true))
     }
   })
-  await audit(request, 'poll.create', 'poll', poll.id, { isQa })
+  await audit(request, 'poll.create', 'poll', poll.id, { isQa, ...(ticketLabel ? { ticketLabel } : {}) })
   response.status(201).json(await getPoll(poll.id, { admin: true }))
 })
 
@@ -1621,8 +1922,25 @@ function hasValidVideoSignature(mimeType, filePath) {
   return mimeType === 'video/webm' && head.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
 }
 
+function adVideoPath(fileName) {
+  const base = path.basename(String(fileName || ''))
+  if (!base) return null
+  const resolved = path.resolve(adVideosDirectory, base)
+  if (!resolved.startsWith(`${adVideosDirectory}${path.sep}`)) return null
+  return resolved
+}
+
 function removeAdVideoFile(fileName) {
-  try { unlinkSync(path.join(adVideosDirectory, path.basename(fileName))) } catch { /* Already removed. */ }
+  const target = adVideoPath(fileName)
+  if (!target) return
+  try { unlinkSync(target) } catch { /* Already removed. */ }
+}
+
+async function removeAdVideoFileIfUnused(fileName) {
+  if (!fileName) return
+  const ref = await database.prepare('SELECT COUNT(*) AS count FROM account_ad_videos WHERE file_name = ?').get(fileName)
+  if (Number(ref?.count || 0) > 0) return
+  removeAdVideoFile(fileName)
 }
 
 const adVideoUpload = multer({
@@ -1637,31 +1955,75 @@ const adVideoUpload = multer({
   },
 })
 
-function adVideoTable(kind) {
-  if (kind === 'raffle') return 'raffle_ad_videos'
-  if (kind === 'scramble') return 'scramble_ad_videos'
-  return 'ad_videos'
+function selectAdVideo(kind, userId) {
+  if (!userId) return Promise.resolve(undefined)
+  return database.prepare(`
+    SELECT user_id AS userId, kind, file_name AS fileName, original_name AS originalName, mime_type AS mimeType, size, updated_at AS updatedAt
+    FROM account_ad_videos WHERE user_id = ? AND kind = ?
+  `).get(userId, kind)
 }
 
-function selectAdVideo(kind) {
-  return database.prepare(`SELECT kind, file_name AS fileName, original_name AS originalName, mime_type AS mimeType, size, updated_at AS updatedAt FROM ${adVideoTable(kind)} WHERE kind = ?`).get(kind)
+async function selectAudienceAdVideo(kind, ownerId) {
+  if (!ownerId) return undefined
+  return (await selectAdVideo(kind, ownerId)) || (['raffle', 'scramble'].includes(kind) ? await selectAdVideo('poll', ownerId) : undefined)
 }
 
-async function selectAudienceAdVideo(kind) {
-  return (await selectAdVideo(kind)) || (['raffle', 'scramble'].includes(kind) ? selectAdVideo('poll') : undefined)
+function adVideoSummary(video, { preview = false, kind = video?.kind, activityId = '' } = {}) {
+  if (!video) return { available: false }
+  const slotKind = kind || video.kind
+  const url = preview
+    ? `/api/admin/ad-videos/${slotKind}/file?v=${encodeURIComponent(video.updatedAt)}`
+    : `/api/ad-videos/${slotKind}/file?${new URLSearchParams({ ...(activityId ? { id: activityId } : {}), v: video.updatedAt })}`
+  return { available: true, url, mimeType: video.mimeType, name: video.originalName, size: video.size, updatedAt: video.updatedAt }
 }
 
-function adVideoSummary(video) {
-  return video
-    ? { available: true, url: `/api/ad-videos/${video.kind}/file?v=${encodeURIComponent(video.updatedAt)}`, mimeType: video.mimeType, name: video.originalName, size: video.size, updatedAt: video.updatedAt }
-    : { available: false }
+async function resolveAdVideoOwner(kind, activityId, request) {
+  if (activityId !== undefined) {
+    if (typeof activityId !== 'string' || !activityId || activityId.length > 128) return { found: false, ownerId: null }
+    let row
+    if (kind === 'poll' || kind === 'qa') {
+      row = await database.prepare('SELECT owner_user_id AS ownerId FROM polls WHERE id = ?').get(activityId)
+    } else if (kind === 'raffle') {
+      row = await database.prepare('SELECT created_by AS ownerId FROM raffle_sessions WHERE id = ?').get(activityId)
+    } else if (kind === 'scramble') {
+      row = await database.prepare('SELECT created_by AS ownerId FROM scramble_games WHERE id = ?').get(activityId)
+    } else if (kind === 'selfie') {
+      if (!/^[A-Za-z0-9_-]{43}$/.test(activityId)) return { found: false, ownerId: null }
+      const session = await getSelfieSessionForJoin(activityId)
+      if (session) row = { ownerId: session.ownerUserId }
+    } else if (kind === 'game') {
+      row = await database.prepare('SELECT owner_user_id AS ownerId FROM game_rooms WHERE id = ?').get(activityId)
+    }
+    if (!row) return { found: false, ownerId: null }
+    return { found: true, ownerId: row.ownerId || null }
+  }
+  const user = await getCurrentUser(request)
+  return { found: true, ownerId: user?.id || null }
 }
 
-app.get('/api/admin/ad-videos', requireAdmin, async (_request, response) => {
-  response.json({ poll: adVideoSummary(await selectAdVideo('poll')), qa: adVideoSummary(await selectAdVideo('qa')), game: adVideoSummary(await selectAdVideo('game')), selfie: adVideoSummary(await selectAdVideo('selfie')), raffle: adVideoSummary(await selectAdVideo('raffle')), scramble: adVideoSummary(await selectAdVideo('scramble')), maxBytes: adVideoMaxBytes })
+app.get('/api/admin/ad-videos', requireUser, async (request, response) => {
+  const userId = request.user.id
+  response.set('Cache-Control', 'no-store').json({
+    poll: adVideoSummary(await selectAdVideo('poll', userId), { preview: true }),
+    qa: adVideoSummary(await selectAdVideo('qa', userId), { preview: true }),
+    game: adVideoSummary(await selectAdVideo('game', userId), { preview: true }),
+    selfie: adVideoSummary(await selectAdVideo('selfie', userId), { preview: true }),
+    raffle: adVideoSummary(await selectAdVideo('raffle', userId), { preview: true }),
+    scramble: adVideoSummary(await selectAdVideo('scramble', userId), { preview: true }),
+    maxBytes: adVideoMaxBytes,
+  })
 })
 
-app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoUpload.single('video'), async (request, response) => {
+app.get('/api/admin/ad-videos/:kind/file', requireUser, requireAdVideoKind, async (request, response) => {
+  const video = await selectAdVideo(request.params.kind, request.user.id)
+  const target = video ? adVideoPath(video.fileName) : null
+  if (!video || !target) return response.status(404).end()
+  response.type(video.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').sendFile(target, (error) => {
+    if (error && !response.headersSent) response.status(404).end()
+  })
+})
+
+app.put('/api/admin/ad-videos/:kind', requireUser, requireAdVideoKind, adVideoUpload.single('video'), async (request, response) => {
   const file = request.file
   if (!file) return response.status(400).json({ error: 'Choose an MP4 or WebM video.' })
   if (!hasValidVideoSignature(file.mimetype, file.path)) {
@@ -1669,44 +2031,75 @@ app.put('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, adVideoU
     return response.status(400).json({ error: 'That file is not a valid MP4 or WebM video.' })
   }
   const kind = request.params.kind
+  const userId = request.user.id
   const fileName = `${kind}-${randomUUID()}${adVideoTypes[file.mimetype]}`
-  renameSync(file.path, path.join(adVideosDirectory, fileName))
-  const previous = await selectAdVideo(kind)
-  await database.prepare(`
-    INSERT INTO ${adVideoTable(kind)} (kind, file_name, original_name, mime_type, size, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE file_name = VALUES(file_name), original_name = VALUES(original_name),
-      mime_type = VALUES(mime_type), size = VALUES(size), updated_at = VALUES(updated_at)
-  `).run(kind, fileName, path.basename(file.originalname).slice(0, 120), file.mimetype, file.size, new Date().toISOString())
-  if (previous) removeAdVideoFile(previous.fileName)
+  const destination = adVideoPath(fileName)
+  if (!destination) {
+    removeAdVideoFile(file.filename)
+    return response.status(500).json({ error: 'Could not store this video.' })
+  }
+  renameSync(file.path, destination)
+  const originalName = path.basename(file.originalname).slice(0, 120)
+  const updatedAt = new Date().toISOString()
+  const previous = await inTransaction(async () => {
+    const existing = await selectAdVideo(kind, userId)
+    if (existing) {
+      await database.prepare(`
+        UPDATE account_ad_videos
+        SET file_name = ?, original_name = ?, mime_type = ?, size = ?, updated_at = ?
+        WHERE user_id = ? AND kind = ?
+      `).run(fileName, originalName, file.mimetype, file.size, updatedAt, userId, kind)
+    } else {
+      await database.prepare(`
+        INSERT INTO account_ad_videos (user_id, kind, file_name, original_name, mime_type, size, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(userId, kind, fileName, originalName, file.mimetype, file.size, updatedAt)
+    }
+    return existing
+  })
+  if (previous) await removeAdVideoFileIfUnused(previous.fileName)
   await audit(request, 'ad-video.upload', 'ad-video', kind, { size: file.size })
-  response.json(adVideoSummary(await selectAdVideo(kind)))
+  response.json(adVideoSummary(await selectAdVideo(kind, userId), { preview: true }))
 })
 
-app.delete('/api/admin/ad-videos/:kind', requireAdmin, requireAdVideoKind, async (request, response) => {
-  const previous = await selectAdVideo(request.params.kind)
+app.delete('/api/admin/ad-videos/:kind', requireUser, requireAdVideoKind, async (request, response) => {
+  const kind = request.params.kind
+  const userId = request.user.id
+  const previous = await selectAdVideo(kind, userId)
   if (!previous) return response.status(404).json({ error: 'No video has been uploaded for this slot.' })
-  await database.prepare(`DELETE FROM ${adVideoTable(request.params.kind)} WHERE kind = ?`).run(request.params.kind)
-  removeAdVideoFile(previous.fileName)
-  await audit(request, 'ad-video.delete', 'ad-video', request.params.kind)
+  await database.prepare('DELETE FROM account_ad_videos WHERE user_id = ? AND kind = ?').run(userId, kind)
+  await removeAdVideoFileIfUnused(previous.fileName)
+  await audit(request, 'ad-video.delete', 'ad-video', kind)
   response.status(204).end()
 })
 
 app.get('/api/ad-videos/:kind', requireAdVideoKind, async (request, response) => {
-  response.set('Cache-Control', 'no-store').json(adVideoSummary(await selectAudienceAdVideo(request.params.kind)))
+  const kind = request.params.kind
+  const activityId = typeof request.query.id === 'string' ? request.query.id : request.query.id === undefined ? undefined : ''
+  const resolved = await resolveAdVideoOwner(kind, activityId, request)
+  if (!resolved.found) return response.status(404).json({ error: 'This activity could not be found.' })
+  const video = await selectAudienceAdVideo(kind, resolved.ownerId)
+  response.set('Cache-Control', 'no-store').json(adVideoSummary(video, { kind, activityId: typeof activityId === 'string' ? activityId : '' }))
 })
 
 app.get('/api/ad-videos/:kind/file', requireAdVideoKind, async (request, response) => {
-  const video = await selectAdVideo(request.params.kind)
-  if (!video) return response.status(404).end()
-  response.type(video.mimeType).set('X-Content-Type-Options', 'nosniff').sendFile(path.join(adVideosDirectory, path.basename(video.fileName)), (error) => {
+  const kind = request.params.kind
+  const activityId = typeof request.query.id === 'string' ? request.query.id : request.query.id === undefined ? undefined : ''
+  const resolved = await resolveAdVideoOwner(kind, activityId, request)
+  if (!resolved.found || !resolved.ownerId) return response.status(404).end()
+  const video = await selectAudienceAdVideo(kind, resolved.ownerId)
+  const target = video ? adVideoPath(video.fileName) : null
+  if (!video || !target) return response.status(404).end()
+  response.type(video.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').sendFile(target, (error) => {
     if (error && !response.headersSent) response.status(404).end()
   })
 })
 
 app.use((error, _request, response, _next) => {
   if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
-    if (_request.path.startsWith('/admin/ad-videos/')) return response.status(413).json({ error: `Videos must be ${Math.ceil(adVideoMaxBytes / 1024 / 1024)} MB or smaller.` })
-    const limit = _request.path.startsWith('/admin/theme/') ? `${Math.ceil(themeImageMaxBytes / 1024 / 1024)} MB` : '5 MB'
+    if (_request.path.includes('/admin/ad-videos/')) return response.status(413).json({ error: `Videos must be ${Math.ceil(adVideoMaxBytes / 1024 / 1024)} MB or smaller.` })
+    if (_request.path.endsWith('/admin/theme/fonts')) return response.status(413).json({ error: `Fonts must be ${Math.ceil(themeFontMaxBytes / 1024 / 1024)} MB or smaller.` })
+    const limit = _request.path.includes('/admin/theme/') ? `${Math.ceil(themeImageMaxBytes / 1024 / 1024)} MB` : '5 MB'
     return response.status(413).json({ error: `Images must be ${limit} or smaller.` })
   }
   if (error?.sqlState || error?.errno || error?.code === 'ER_LOCK_WAIT_TIMEOUT') {

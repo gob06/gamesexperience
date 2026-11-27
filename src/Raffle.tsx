@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import QRCode from 'qrcode'
 import { ArrowLeft, ArrowUpRight, Check, Copy, ImagePlus, LogOut, MonitorPlay, Play, QrCode, RefreshCw, Shuffle, Smartphone, Square, Ticket, Trash2, Trophy, X } from 'lucide-react'
-import { ThemeBrand, useTheme } from './theme'
+import { getDisplayPresentation, ThemeBrand, useTheme } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
@@ -11,6 +11,7 @@ import { DisplayImagePicker } from './DisplayImagePicker'
 type Raffle = {
   id: string
   title: string
+  ticketLabel?: string | null
   logoUrl: string | null
   displayImage1Url?: string | null
   displayImage2Url?: string | null
@@ -114,7 +115,7 @@ type RaffleDisplayData = {
 }
 
 export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
-  const { assetUrls } = useTheme()
+  const { theme, assetUrls } = useTheme()
   const [data, setData] = useState<RaffleDisplayData | null>(null)
   const [rollingEntry, setRollingEntry] = useState<RaffleEntry | null>(null)
   const [shareUrl, setShareUrl] = useState('')
@@ -185,9 +186,10 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
   const displayWinners = !isDrawing ? data?.latestWinners ?? [] : []
   const hasWinners = displayWinners.length > 0
   const showQrOnly = Boolean(data && !isDrawing && !hasWinners)
+  const display = getDisplayPresentation(theme, assetUrls, 'raffle-display')
 
   return (
-    <main className={`raffle-screen-shell ${isDrawing ? 'is-drawing' : ''} ${hasWinners ? 'has-winner' : ''} ${hasWinners && displayWinners.length <= 4 ? 'has-few-winners' : ''} ${hasWinners && displayWinners.length <= 2 ? 'has-one-or-two-winners' : ''}`}>
+    <main className={`raffle-screen-shell ${isDrawing ? 'is-drawing' : ''} ${hasWinners ? 'has-winner' : ''} ${hasWinners && displayWinners.length <= 4 ? 'has-few-winners' : ''} ${hasWinners && displayWinners.length <= 2 ? 'has-one-or-two-winners' : ''} ${display.className}`} style={display.style}>
       {data && error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
       {!data ? (
         <div className="raffle-screen-message">{error || 'Connecting to raffle…'}</div>
@@ -208,10 +210,10 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
               {isDrawing ? (
                 <div className="raffle-screen-draw">
                   <strong key={rollingEntry?.id || 'empty'} className="raffle-screen-name">{rollingEntry?.participantName || 'Waiting for eligible tickets…'}</strong>
-                  {rollingEntry && <span className="raffle-screen-ticket">TICKET {rollingEntry.ticketNumber}</span>}
+                  {rollingEntry && <span className="raffle-screen-ticket">{(data.raffle.ticketLabel?.trim() || 'Ticket').toUpperCase()} {rollingEntry.ticketNumber}</span>}
                 </div>
               ) : hasWinners && (
-                <DisplayWinners winners={displayWinners} label="Latest draw winners" />
+                <DisplayWinners winners={displayWinners} label="Latest draw winners" ticketLabel={data.raffle.ticketLabel} />
               )}
             </div>
           </div>
@@ -222,7 +224,7 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
 }
 
 export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
-  const { assetUrls } = useTheme()
+  const { theme, assetUrls } = useTheme()
   const [raffle, setRaffle] = useState<Raffle | null>(null)
   const [participantName, setParticipantName] = useState('')
   const [ticketNumber, setTicketNumber] = useState('')
@@ -288,8 +290,10 @@ export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
     }
   }
 
+  const display = getDisplayPresentation(theme, assetUrls, 'raffle-register')
+
   return (
-    <main className="raffle-audience-shell">
+    <main className={`raffle-audience-shell ${display.className}`} style={display.style}>
       <section className="raffle-audience-panel">
         {loading ? <p className="raffle-muted">Loading raffle…</p> : !raffle ? (
           <div className="raffle-notice raffle-error" role="alert">{error || 'This raffle could not be found.'}</div>
@@ -298,24 +302,27 @@ export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
             {(raffle.logoUrl || assetUrls.logo) && <img className="raffle-event-logo" src={raffle.logoUrl || assetUrls.logo} alt="Event logo" />}
             {registered ? (
               <div className="raffle-success" role="status"><Check size={26} /><strong>Your ticket is registered.</strong><span>Good luck, {participantName.trim()}!</span></div>
-            ) : raffle.registrationOpen ? (
+            ) : raffle.registrationOpen ? (() => {
+              const ticketFieldLabel = raffle.ticketLabel?.trim() || 'Ticket number'
+              return (
               <form className="raffle-entry-form" onSubmit={(event) => void register(event)}>
                 {resetNotice && <p className="raffle-notice" role="status">{resetNotice}</p>}
                 <label htmlFor="raffle-participant-name">Ticket holder name</label>
                 <input id="raffle-participant-name" autoComplete="name" maxLength={80} value={participantName} onChange={(event) => setParticipantName(event.target.value)} placeholder="Enter your name" required />
-                <label htmlFor="raffle-ticket-number">Ticket number</label>
-                <input id="raffle-ticket-number" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder="Enter your ticket number" required />
+                <label htmlFor="raffle-ticket-number">{ticketFieldLabel}</label>
+                <input id="raffle-ticket-number" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder={`Enter your ${ticketFieldLabel.toLowerCase()}`} required />
                 {error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
                 <button className="button button-primary raffle-submit" type="submit" disabled={busy}>{busy ? 'Registering…' : 'Register ticket'} <Ticket size={17} /></button>
                 <TermsNotice />
               </form>
-            ) : (
+              )
+            })() : (
               <div className="raffle-notice" role="status">Registration is closed while the host is drawing.</div>
             )}
           </>
         )}
       </section>
-      {showAd && <AdVideoOverlay kind="raffle" onDone={() => setShowAd(false)} />}
+      {showAd && <AdVideoOverlay kind="raffle" activityId={raffleId} onDone={() => setShowAd(false)} />}
     </main>
   )
 }
@@ -334,6 +341,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   const [tab, setTab] = useState<RaffleTab>('qr')
 
   const [title, setTitle] = useState('')
+  const [ticketLabel, setTicketLabel] = useState('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState('')
   const [displayImage1, setDisplayImage1] = useState<File | null>(null)
@@ -342,12 +350,29 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirmBusy, setConfirmBusy] = useState(false)
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    kind: 'reset' | 'delete'
+    raffle: Raffle
+    title: string
+    message: string
+    confirmLabel: string
+  } | null>(null)
   const logoInputRef = useRef<HTMLInputElement>(null)
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
   const refreshGeneration = useRef(0)
   const isDrawing = activeRaffle?.drawStatus === 'drawing'
   const activeLogoUrl = activeRaffle?.logoUrl || assetUrls.logo || null
+
+  useEffect(() => {
+    if (!pendingConfirmation) return
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !confirmBusy) setPendingConfirmation(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [pendingConfirmation, confirmBusy])
 
   useEffect(() => {
     if (!logoPreview) return
@@ -424,6 +449,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     setNotice('')
     const data = new FormData()
     data.append('title', title.trim())
+    if (ticketLabel.trim()) data.append('ticketLabel', ticketLabel.trim())
     if (logoFile) data.append('logo', logoFile)
     if (displayImage1) data.append('displayImage1', displayImage1)
     if (displayImage2) data.append('displayImage2', displayImage2)
@@ -432,6 +458,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
       setRaffles((current) => [created, ...current])
       setSelectedId(created.id)
       setTitle('')
+      setTicketLabel('')
       setLogoFile(null)
       setLogoPreview('')
       setDisplayImage1(null)
@@ -446,8 +473,17 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     }
   }
 
+  function requestDeleteRaffle(raffle: Raffle) {
+    setPendingConfirmation({
+      kind: 'delete',
+      raffle,
+      title: `Delete "${raffle.title}"?`,
+      message: 'All registered tickets and winner history for this raffle will be removed.',
+      confirmLabel: 'Delete raffle',
+    })
+  }
+
   async function deleteRaffle(raffle: Raffle) {
-    if (!window.confirm(`Delete "${raffle.title}"? All registered tickets and winner history for this raffle will be removed.`)) return
     setError('')
     setNotice('')
     try {
@@ -465,9 +501,20 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     }
   }
 
-  async function resetRaffle() {
-    if (!activeRaffle || busy || !window.confirm(`Reset "${activeRaffle.title}"? All registrations and winner history will be permanently deleted, and any active draw will stop. The raffle and its QR link will be kept.`)) return
-    const id = activeRaffle.id
+  function requestResetRaffle() {
+    if (!activeRaffle || busy) return
+    setPendingConfirmation({
+      kind: 'reset',
+      raffle: activeRaffle,
+      title: `Reset "${activeRaffle.title}"?`,
+      message: 'All registrations and winner history will be permanently deleted, and any active draw will stop. The raffle and its QR link will be kept.',
+      confirmLabel: 'Reset event',
+    })
+  }
+
+  async function resetRaffle(raffle: Raffle) {
+    if (busy) return
+    const id = raffle.id
     refreshGeneration.current++
     setBusy(true)
     setError('')
@@ -485,7 +532,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
         setTab('qr')
         setNotice('Raffle reset. Registrations and winner history were deleted.')
       }
-      setRaffles((current) => current.map((raffle) => raffle.id === id ? { ...raffle, drawStatus: 'idle', drawWinnerCount: 1, entryCount: 0, winnerCount: 0 } : raffle))
+      setRaffles((current) => current.map((item) => item.id === id ? { ...item, drawStatus: 'idle', drawWinnerCount: 1, entryCount: 0, winnerCount: 0 } : item))
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not reset the raffle.')
     } finally {
@@ -615,6 +662,9 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
               <h2>Create a raffle</h2>
               <label htmlFor="raffle-title">Event or raffle name</label>
               <input id="raffle-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={3} maxLength={120} placeholder="e.g. Championship night" required />
+              <label htmlFor="raffle-ticket-label">Ticket number label</label>
+              <input id="raffle-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
+              <p className="raffle-help">Shown on guest registration and the open display. Leave blank for Ticket number.</p>
               <input ref={logoInputRef} className="raffle-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={selectLogo} aria-label="Upload QR logo" />
               <div className="raffle-logo-row">
                 <span className="raffle-logo-preview">{logoPreview ? <img src={logoPreview} alt="Logo preview" /> : <ImagePlus size={19} />}</span>
@@ -637,7 +687,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                   <button type="button" className="raffle-session-select" onClick={() => { setSelectedId(raffle.id); setTab('qr') }}>
                     <span>{raffle.title}</span><small>{raffle.entryCount ?? 0} tickets · {raffle.winnerCount ?? 0} winners</small>
                   </button>
-                  <button className="icon-button raffle-session-delete" type="button" onClick={() => void deleteRaffle(raffle)} aria-label={`Delete ${raffle.title}`} title="Delete raffle"><Trash2 size={16} /></button>
+                  <button className="icon-button raffle-session-delete" type="button" onClick={() => requestDeleteRaffle(raffle)} aria-label={`Delete ${raffle.title}`} title="Delete raffle"><Trash2 size={16} /></button>
                 </div>
               ))}
             </section>
@@ -652,7 +702,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                   <div><span className="raffle-kicker">ACTIVE RAFFLE</span><h2>{activeRaffle.title}</h2></div>
                   <div className="raffle-heading-actions">
                     <a className="button button-secondary raffle-display-link" href={`/raffle/${activeRaffle.id}/display`}><MonitorPlay size={16} /> Open display</a>
-                    <button className="button button-secondary" type="button" disabled={busy} onClick={() => void resetRaffle()}><RefreshCw size={16} /> Reset event</button>
+                    <button className="button button-secondary" type="button" disabled={busy} onClick={requestResetRaffle}><RefreshCw size={16} /> Reset event</button>
                     <div className="raffle-counts"><span><strong>{entries.length}</strong> registered</span><span><strong>{winners.length}</strong> winners</span></div>
                   </div>
                 </div>
@@ -666,7 +716,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                   <section className="raffle-qr-view" role="tabpanel">
                     <div className="raffle-qr-card">
                       <div className="raffle-qr-frame"><RaffleQrCode value={shareUrl} logoUrl={activeLogoUrl} label={`QR code to register for ${activeRaffle.title}`} /></div>
-                      <div className="raffle-qr-copy"><span className="raffle-kicker">SCAN TO ENTER</span><h3>{activeRaffle.title}</h3><p>Ticket holders scan the code, enter their name and ticket number, and register once.</p><span className="raffle-url">{shareUrl}</span></div>
+                      <div className="raffle-qr-copy"><span className="raffle-kicker">SCAN TO ENTER</span><h3>{activeRaffle.title}</h3><p>Ticket holders scan the code, enter their name and {(activeRaffle.ticketLabel?.trim() || 'ticket number').toLowerCase()}, and register once.</p><span className="raffle-url">{shareUrl}</span></div>
                     </div>
                     <div className="raffle-toolbar"><button className="button button-secondary" onClick={() => void copyRaffleLink()}><Copy size={16} /> Copy link</button><button className="button button-secondary" onClick={() => void downloadQr()}><QrCode size={16} /> Download QR</button><a className="button button-primary" href={`/raffle/join/${activeRaffle.id}`} target="_blank" rel="noreferrer">Open audience page <ArrowUpRight size={16} /></a></div>
                   </section>
@@ -676,9 +726,9 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                   <section className={`raffle-draw-view ${isDrawing ? 'is-drawing' : ''}`} role="tabpanel">
                     <div className="raffle-draw-stage">
                       <span className="raffle-draw-status">{isDrawing ? `DRAWING ${activeRaffle.drawWinnerCount} WINNER${activeRaffle.drawWinnerCount === 1 ? '' : 'S'}` : latestWinners.length ? 'LATEST WINNERS' : 'READY TO DRAW'}</span>
-                      {displayedEntry ? <><strong>{displayedEntry.participantName}</strong><span className="raffle-ticket-result"><Ticket size={18} /> Ticket {displayedEntry.ticketNumber}</span></> : !isDrawing && latestWinners.length > 1 ? (
+                      {displayedEntry ? <><strong>{displayedEntry.participantName}</strong><span className="raffle-ticket-result"><Ticket size={18} /> {activeRaffle.ticketLabel?.trim() || 'Ticket'} {displayedEntry.ticketNumber}</span></> : !isDrawing && latestWinners.length > 1 ? (
                         <ul className="raffle-draw-winners">
-                          {latestWinners.map((entry) => <li key={entry.id}><strong>{entry.participantName}</strong><span>Ticket {entry.ticketNumber}</span></li>)}
+                          {latestWinners.map((entry) => <li key={entry.id}><strong>{entry.participantName}</strong><span>{activeRaffle.ticketLabel?.trim() || 'Ticket'} {entry.ticketNumber}</span></li>)}
                         </ul>
                       ) : <p>{eligible.length ? 'Press DRAW to start the randomizer.' : 'Register tickets before drawing a winner.'}</p>}
                     </div>
@@ -698,7 +748,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
                   <section className="raffle-winner-list" role="tabpanel">
                     <h3>Winner history</h3>
                     {!winners.length ? <p className="raffle-muted">No winner has been drawn yet.</p> : winners.map((entry, index) => (
-                      <article className="raffle-winner-row" key={entry.id}><span className="raffle-winner-rank"><Trophy size={17} /> {winners.length - index}</span><strong>{entry.participantName}</strong><span>Ticket {entry.ticketNumber}</span><time>{entry.wonAt ? new Date(entry.wonAt).toLocaleString() : ''}</time></article>
+                      <article className="raffle-winner-row" key={entry.id}><span className="raffle-winner-rank"><Trophy size={17} /> {winners.length - index}</span><strong>{entry.participantName}</strong><span>{activeRaffle.ticketLabel?.trim() || 'Ticket'} {entry.ticketNumber}</span><time>{entry.wonAt ? new Date(entry.wonAt).toLocaleString() : ''}</time></article>
                     ))}
                   </section>
                 )}
@@ -707,6 +757,58 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
           </section>
         </section>
       </div>
+      {pendingConfirmation && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !confirmBusy) setPendingConfirmation(null)
+          }}
+        >
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="raffle-confirm-title">
+            <button
+              className="icon-button modal-close"
+              type="button"
+              onClick={() => setPendingConfirmation(null)}
+              aria-label="Close"
+              disabled={confirmBusy}
+            >
+              <X size={19} />
+            </button>
+            <div className="modal-kicker">QR RAFFLE</div>
+            <h2 id="raffle-confirm-title">{pendingConfirmation.title}</h2>
+            <p className="share-question">{pendingConfirmation.message}</p>
+            <div className="create-game-actions">
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={() => setPendingConfirmation(null)}
+                disabled={confirmBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="button button-primary"
+                type="button"
+                autoFocus
+                disabled={confirmBusy}
+                onClick={async () => {
+                  const confirmation = pendingConfirmation
+                  setConfirmBusy(true)
+                  try {
+                    if (confirmation.kind === 'reset') await resetRaffle(confirmation.raffle)
+                    else await deleteRaffle(confirmation.raffle)
+                  } finally {
+                    setConfirmBusy(false)
+                    setPendingConfirmation(null)
+                  }
+                }}
+              >
+                {confirmBusy ? 'Working…' : pendingConfirmation.confirmLabel}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   )
 }

@@ -4,7 +4,7 @@ import {
   ArrowLeft, ArrowUpRight, Check, CircleCheck, CircleX, Copy, Eye, ImagePlus, Lock, LogOut, Megaphone,
   MonitorPlay, Pause, Play, QrCode, RefreshCw, Search, Shuffle, Smartphone, Square, Ticket, Trash2, Trophy, Users, X,
 } from 'lucide-react'
-import { ThemeBrand, useTheme } from './theme'
+import { getDisplayPresentation, ThemeBrand, useTheme } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
@@ -16,6 +16,7 @@ type ScrambleStatus = 'draft' | 'active' | 'paused' | 'closed' | 'completed'
 type ScrambleSummary = {
   id: string
   title: string
+  ticketLabel?: string | null
   status: ScrambleStatus
   createdAt: string
   logoUrl: string | null
@@ -26,6 +27,7 @@ type ScrambleSummary = {
 type PublicScramble = {
   id: string
   title: string
+  ticketLabel?: string | null
   status: ScrambleStatus
   logoUrl: string | null
   displayLogoUrl: string | null
@@ -40,6 +42,7 @@ type PublicScramble = {
 type HostScramble = {
   id: string
   title: string
+  ticketLabel?: string | null
   status: ScrambleStatus
   logoUrl: string | null
   displayLogoUrl: string | null
@@ -226,7 +229,7 @@ function loadStoredEntry(gameId: string): ParticipantRecord | null {
 }
 
 export function ScrambleJoinPage({ gameId }: { gameId: string }) {
-  const { assetUrls } = useTheme()
+  const { theme, assetUrls } = useTheme()
   const [entry, setEntry] = useState<ParticipantRecord | null>(() => loadStoredEntry(gameId))
   const [game, setGame] = useState<PublicScramble | null>(null)
   const [me, setMe] = useState<ParticipantData['me'] | null>(null)
@@ -308,9 +311,10 @@ export function ScrambleJoinPage({ gameId }: { gameId: string }) {
 
   const gameEnded = game?.status === 'closed' || game?.status === 'completed'
   const answered = Boolean(me?.answered || result)
+  const display = getDisplayPresentation(theme, assetUrls, !entry ? 'scramble-register' : 'scramble-play')
 
   return (
-    <main className="raffle-audience-shell scramble-audience-shell">
+    <main className={`raffle-audience-shell scramble-audience-shell ${display.className}`} style={display.style}>
       <section className="raffle-audience-panel">
         {loading ? <p className="raffle-muted">Loading word scramble…</p> : !game ? (
           <div className="raffle-notice raffle-error" role="alert">{error || 'This word scramble could not be found.'}</div>
@@ -320,25 +324,28 @@ export function ScrambleJoinPage({ gameId }: { gameId: string }) {
             <h1 className="scramble-audience-title">{game.title}</h1>
 
             {!entry ? (
-              game.registrationOpen ? (
+              game.registrationOpen ? (() => {
+                const ticketFieldLabel = game.ticketLabel?.trim() || 'Ticket number'
+                return (
                 <form className="raffle-entry-form" onSubmit={(event) => void register(event)}>
-                  <p className="scramble-instructions">Unscramble the word to enter the winner pool. Register once with your name and ticket number.</p>
+                  <p className="scramble-instructions">Unscramble the word to enter the winner pool. Register once with your name and {ticketFieldLabel.toLowerCase()}.</p>
                   <label htmlFor="scramble-participant-name">Your name</label>
                   <input id="scramble-participant-name" autoComplete="name" maxLength={80} value={participantName} onChange={(event) => setParticipantName(event.target.value)} placeholder="Enter your name" required />
-                  <label htmlFor="scramble-ticket-number">Ticket number</label>
-                  <input id="scramble-ticket-number" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder="Enter your ticket number" required />
+                  <label htmlFor="scramble-ticket-number">{ticketFieldLabel}</label>
+                  <input id="scramble-ticket-number" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder={`Enter your ${ticketFieldLabel.toLowerCase()}`} required />
                   {error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
                   <button className="button button-primary raffle-submit" type="submit" disabled={busy}>{busy ? 'Registering…' : 'Register and continue'} <Ticket size={17} /></button>
                   <TermsNotice />
                 </form>
-              ) : (
+                )
+              })() : (
                 <div className="raffle-notice" role="status">Participation for this game has ended.</div>
               )
             ) : answered ? (
               showAd ? (
                 <>
                   <p className="raffle-muted" role="status">Your answer has been recorded…</p>
-                  <AdVideoOverlay kind="scramble" onDone={() => setShowAd(false)} />
+                  <AdVideoOverlay kind="scramble" activityId={gameId} onDone={() => setShowAd(false)} />
                 </>
               ) : (
                 <div className={`scramble-result ${result === 'correct' ? 'is-correct' : 'is-incorrect'}`} role="status">
@@ -377,7 +384,7 @@ export function ScrambleJoinPage({ gameId }: { gameId: string }) {
 }
 
 export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
-  const { assetUrls } = useTheme()
+  const { theme, assetUrls } = useTheme()
   const [data, setData] = useState<DisplayData | null>(null)
   const [shareUrl, setShareUrl] = useState('')
   const [error, setError] = useState('')
@@ -421,7 +428,9 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
     }
   }, [])
 
-  if (!data) return <main className="scramble-screen-shell"><div className="raffle-screen-message">{error || 'Connecting to word scramble…'}</div></main>
+  const display = getDisplayPresentation(theme, assetUrls, 'scramble-display')
+
+  if (!data) return <main className={`scramble-screen-shell ${display.className}`} style={display.style}><div className="raffle-screen-message">{error || 'Connecting to word scramble…'}</div></main>
 
   const { game, announcedWinners } = data
   const eventLogoUrl = game.logoUrl || assetUrls.logo || null
@@ -434,7 +443,7 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
     : 'word'
 
   return (
-    <main className={screen === 'intro' ? 'raffle-screen-shell' : `scramble-screen-shell is-${screen}${game.displayLogoUrl ? ' has-display-logo' : ''}${announcedWinners.length === 3 ? ' has-three-winners' : ''}`}>
+    <main className={`${screen === 'intro' ? 'raffle-screen-shell scramble-intro-screen-shell' : `scramble-screen-shell is-${screen}${game.displayLogoUrl ? ' has-display-logo' : ''}${announcedWinners.length === 3 ? ' has-three-winners' : ''}`} ${display.className}`} style={display.style}>
       {screen === 'intro' && (
         <section className="raffle-screen-qr-only" aria-label="Word scramble registration QR code">
           {shareUrl ? <ScrambleQrCode value={shareUrl} logoUrl={eventLogoUrl} size={1024} label={`QR code to join ${game.title}`} /> : <span>Loading QR…</span>}
@@ -471,7 +480,7 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
         <section className="scramble-screen-stage" aria-live="polite">
           <WinnerDisplayHeading game={game} />
           {game.revealedAnswer && <div className="scramble-screen-answer"><p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p><div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer} /></div></div>}
-          <DisplayWinners winners={announcedWinners} />
+          <DisplayWinners winners={announcedWinners} ticketLabel={game.ticketLabel} />
         </section>
       )}
       {screen === 'completed' && (
@@ -481,7 +490,7 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
           <p className="scramble-screen-subtitle">THANK YOU FOR PLAYING!</p>
           {game.revealedAnswer && <div className="scramble-screen-answer"><p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p><div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer} /></div></div>}
           {announcedWinners.length > 0 && (
-            <DisplayWinners winners={announcedWinners} />
+            <DisplayWinners winners={announcedWinners} ticketLabel={game.ticketLabel} />
           )}
         </section>
       )}
@@ -497,6 +506,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
   const [tab, setTab] = useState<ScrambleTab>('qr')
 
   const [title, setTitle] = useState('')
+  const [ticketLabel, setTicketLabel] = useState('')
   const [answerDraft, setAnswerDraft] = useState('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState('')
@@ -600,15 +610,17 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
     setNotice('')
     const body = new FormData()
     body.append('title', title.trim())
+    if (ticketLabel.trim()) body.append('ticketLabel', ticketLabel.trim())
     body.append('answer', answerDraft.trim())
     if (logoFile) body.append('logo', logoFile)
     if (displayImage1) body.append('displayImage1', displayImage1)
     if (displayImage2) body.append('displayImage2', displayImage2)
     try {
       const created = await requestJson<HostScramble>('/api/scrambles', { method: 'POST', body })
-      setGames((current) => [{ id: created.id, title: created.title, status: created.status, createdAt: created.createdAt, logoUrl: created.logoUrl, entryCount: 0, winnerCount: 0 }, ...current])
+      setGames((current) => [{ id: created.id, title: created.title, ticketLabel: created.ticketLabel, status: created.status, createdAt: created.createdAt, logoUrl: created.logoUrl, entryCount: 0, winnerCount: 0 }, ...current])
       setSelectedId(created.id)
       setTitle('')
+      setTicketLabel('')
       setAnswerDraft('')
       setLogoFile(null)
       setLogoPreview('')
@@ -810,6 +822,9 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
               <h2>Create a word scramble</h2>
               <label htmlFor="scramble-title">Event or game name</label>
               <input id="scramble-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={3} maxLength={120} placeholder="e.g. Lay Bare x PVL Game Night" required />
+              <label htmlFor="scramble-ticket-label">Ticket number label</label>
+              <input id="scramble-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
+              <p className="raffle-help">Shown on guest registration and the open display. Leave blank for Ticket number.</p>
               <label htmlFor="scramble-answer-input">Correct word or phrase</label>
               <input id="scramble-answer-input" value={answerDraft} onChange={(event) => setAnswerDraft(event.target.value)} minLength={2} maxLength={120} placeholder="e.g. CHAMPIONS" autoComplete="off" required />
               <p className="raffle-help">The answer stays private on the server. A scrambled version is generated automatically and can be edited before the game starts.</p>
@@ -863,7 +878,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                   <section className="raffle-qr-view" role="tabpanel">
                     <div className="raffle-qr-card">
                       <div className="raffle-qr-frame"><ScrambleQrCode value={shareUrl} logoUrl={activeLogoUrl} label={`QR code to join ${game.title}`} /></div>
-                      <div className="raffle-qr-copy"><span className="raffle-kicker">SCAN TO PLAY</span><h3>{game.title}</h3><p>The same QR code stays valid for the whole event. Players register once with a name and ticket number, then answer once.</p><span className="raffle-url">{shareUrl}</span></div>
+                      <div className="raffle-qr-copy"><span className="raffle-kicker">SCAN TO PLAY</span><h3>{game.title}</h3><p>The same QR code stays valid for the whole event. Players register once with a name and {(game.ticketLabel?.trim() || 'ticket number').toLowerCase()}, then answer once.</p><span className="raffle-url">{shareUrl}</span></div>
                     </div>
                     <div className="raffle-toolbar"><button className="button button-secondary" onClick={() => void copyLink()}><Copy size={16} /> Copy link</button><button className="button button-secondary" onClick={() => void downloadQr()}><QrCode size={16} /> Download QR</button><a className="button button-primary" href={`/scramble/join/${game.id}`} target="_blank" rel="noreferrer">Open audience page <ArrowUpRight size={16} /></a></div>
                   </section>
@@ -960,12 +975,12 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                   <section className="scramble-participants-view" role="tabpanel">
                     <div className="scramble-search">
                       <Search size={16} aria-hidden="true" />
-                      <input value={participantFilter} onChange={(event) => setParticipantFilter(event.target.value)} placeholder="Search by name or ticket number" aria-label="Search participants" />
+                      <input value={participantFilter} onChange={(event) => setParticipantFilter(event.target.value)} placeholder={`Search by name or ${(game.ticketLabel?.trim() || 'ticket number').toLowerCase()}`} aria-label="Search participants" />
                     </div>
                     {!filteredEntries.length ? <p className="raffle-muted">{entries.length ? 'No participants match this search.' : 'Registered participants will appear here.'}</p> : (
                       <div className="scramble-table-wrap">
                         <table className="scramble-table">
-                          <thead><tr><th>Name</th><th>Ticket</th><th>Registered</th><th>Answer</th><th>Status</th></tr></thead>
+                          <thead><tr><th>Name</th><th>{game.ticketLabel?.trim() || 'Ticket'}</th><th>Registered</th><th>Answer</th><th>Status</th></tr></thead>
                           <tbody>
                             {filteredEntries.map((entry) => (
                               <tr key={entry.id}>
@@ -1032,7 +1047,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                       <div className="scramble-winner-group">
                         <h3><Eye size={15} /> Private review — not yet visible anywhere</h3>
                         <ul className="scramble-winner-list">
-                          {selectedWinners.map((entry) => <li key={entry.id}><strong>{entry.participantName}</strong><span>Ticket {entry.ticketNumber}</span></li>)}
+                          {selectedWinners.map((entry) => <li key={entry.id}><strong>{entry.participantName}</strong><span>{game.ticketLabel?.trim() || 'Ticket'} {entry.ticketNumber}</span></li>)}
                         </ul>
                         <button
                           className="button button-primary"
@@ -1066,7 +1081,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
                         <ul className="scramble-winner-list">
                           {confirmedWinners.map((entry) => (
                             <li key={entry.id}>
-                              <strong>{entry.participantName}</strong><span>Ticket {entry.ticketNumber}</span>
+                              <strong>{entry.participantName}</strong><span>{game.ticketLabel?.trim() || 'Ticket'} {entry.ticketNumber}</span>
                               {entry.announcedAt
                                 ? <span className="scramble-pill is-winner"><Megaphone size={13} /> Announced</span>
                                 : <button className="button button-secondary" type="button" disabled={busy} onClick={() => announceOne(entry)}><Megaphone size={14} /> Announce</button>}

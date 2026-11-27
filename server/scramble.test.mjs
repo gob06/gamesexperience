@@ -81,6 +81,7 @@ test('announcing winners reveals the answer together with only announced winners
   })
   const form = new FormData()
   form.append('title', 'Word game')
+  form.append('ticketLabel', 'Seat number')
   form.append('answer', 'APPLE')
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aAX8AAAAASUVORK5CYII=', 'base64')
   form.append('displayLogo', new Blob([png], { type: 'image/png' }), 'display.png')
@@ -91,6 +92,9 @@ test('announcing winners reveals the answer together with only announced winners
   assert.equal(created.status, 201)
   const game = await created.json()
   const url = `/api/scrambles/${game.id}`
+  assert.equal(game.ticketLabel, 'Seat number')
+  assert.equal((await (await fetch(`${base}${url}`)).json()).ticketLabel, 'Seat number')
+  assert.equal((await (await fetch(`${base}${url}/display`)).json()).game.ticketLabel, 'Seat number')
   assert.equal(game.logoUrl, `${url}/logo?version=1`)
   assert.equal(game.displayLogoUrl, `${url}/display-logo?version=1`)
   assert.equal(game.displayImage1Url, `${url}/display-image/1?version=1`)

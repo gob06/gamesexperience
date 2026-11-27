@@ -8,7 +8,7 @@ const duplicateTicketMessage = 'This ticket number has already been registered. 
 const registrationLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.RAFFLE_REGISTRATION_LIMIT_PER_MINUTE || 60) })
 
 const selectRaffle = database => database.prepare(`
-  SELECT id, title, draw_status AS drawStatus, draw_winner_count AS drawWinnerCount, reset_version AS resetVersion, created_at AS createdAt,
+  SELECT id, title, ticket_label AS ticketLabel, draw_status AS drawStatus, draw_winner_count AS drawWinnerCount, reset_version AS resetVersion, created_at AS createdAt,
     CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/logo?version=2') END AS logoUrl,
     CASE WHEN display_image_1 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/1?version=1') END AS displayImage1Url,
     CASE WHEN display_image_2 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/2?version=1') END AS displayImage2Url
@@ -37,6 +37,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
   app.get('/api/raffles', requireUser, async (request, response) => {
     const raffles = await database.prepare(`
       SELECT raffle_sessions.id, raffle_sessions.title,
+        raffle_sessions.ticket_label AS ticketLabel,
         raffle_sessions.draw_status AS drawStatus,
         raffle_sessions.draw_winner_count AS drawWinnerCount,
         raffle_sessions.reset_version AS resetVersion,
@@ -56,6 +57,8 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
   app.post('/api/raffles', requireUser, createUpload, async (request, response) => {
     const title = typeof request.body.title === 'string' ? request.body.title.trim() : ''
     if (title.length < 3 || title.length > 120) return response.status(400).json({ error: 'Raffle title must be between 3 and 120 characters.' })
+    const ticketLabel = typeof request.body.ticketLabel === 'string' ? request.body.ticketLabel.trim() : ''
+    if (ticketLabel.length > 40) return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
     const logo = request.files?.logo?.[0]
     const displayImage1 = request.files?.displayImage1?.[0]
     const displayImage2 = request.files?.displayImage2?.[0]
@@ -67,16 +70,16 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
 
     const raffle = { id: randomUUID(), title, createdAt: new Date().toISOString() }
     await database.prepare(`
-      INSERT INTO raffle_sessions (id, title, logo_mime_type, logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, draw_status, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+      INSERT INTO raffle_sessions (id, title, ticket_label, logo_mime_type, logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, draw_status, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
     `).run(
-      raffle.id, title,
+      raffle.id, title, ticketLabel || null,
       logo?.mimetype || null, logo?.buffer || null,
       displayImage1?.mimetype || null, displayImage1?.buffer || null,
       displayImage2?.mimetype || null, displayImage2?.buffer || null,
       request.user.id, raffle.createdAt, raffle.createdAt,
     )
-    await audit(request, 'raffle.create', 'raffle', raffle.id, { title })
+    await audit(request, 'raffle.create', 'raffle', raffle.id, { title, ...(ticketLabel ? { ticketLabel } : {}) })
     response.status(201).json(await getRaffle.get(raffle.id))
   })
 
@@ -160,10 +163,11 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     if (!raffle) return response.status(404).json({ error: 'This raffle could not be found.' })
     if (raffle.drawStatus === 'drawing') return response.status(423).json({ error: 'Registration is closed while the raffle draw is in progress.' })
 
+    const fieldLabel = (raffle.ticketLabel || 'ticket number').toLowerCase()
     const participantName = typeof request.body?.participantName === 'string' ? request.body.participantName.trim().replace(/\s+/g, ' ') : ''
     const ticketNumber = typeof request.body?.ticketNumber === 'string' ? request.body.ticketNumber.trim() : ''
     if (!participantNamePattern.test(participantName)) return response.status(400).json({ error: 'Enter a name between 2 and 80 characters.' })
-    if (!ticketNumberPattern.test(ticketNumber)) return response.status(400).json({ error: 'Enter a ticket number using letters, numbers, spaces, dashes, slashes, or underscores.' })
+    if (!ticketNumberPattern.test(ticketNumber)) return response.status(400).json({ error: `Enter a ${fieldLabel} using letters, numbers, spaces, dashes, slashes, or underscores.` })
 
     const entry = {
       id: randomUUID(),
@@ -188,7 +192,13 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
       if (registered === 'missing') return response.status(404).json({ error: 'This raffle could not be found.' })
       if (registered === 'drawing') return response.status(423).json({ error: 'Registration is closed while the raffle draw is in progress.' })
     } catch (error) {
-      if (isDuplicateKeyError(error)) return response.status(409).json({ error: duplicateTicketMessage })
+      if (isDuplicateKeyError(error)) {
+        return response.status(409).json({
+          error: raffle.ticketLabel
+            ? `This ${fieldLabel} has already been registered. Duplicate entries are not allowed.`
+            : duplicateTicketMessage,
+        })
+      }
       throw error
     }
 

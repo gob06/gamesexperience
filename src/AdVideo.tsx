@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { Film, LogOut, Trash2, Upload } from 'lucide-react'
+import { Film, LogOut, Trash2, Upload, X } from 'lucide-react'
 import { ThemeBrand } from './theme'
 
 export type AdVideoKind = 'poll' | 'qa' | 'game' | 'selfie' | 'raffle' | 'scramble'
@@ -181,7 +181,7 @@ export function AdVideoPlayer({ url, mimeType = 'video/mp4', expectedSize, video
   )
 }
 
-export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: () => void }) {
+export function AdVideoOverlay({ kind, activityId, onDone }: { kind: AdVideoKind; activityId?: string; onDone: () => void }) {
   const [info, setInfo] = useState<AdVideoInfo | null>(null)
   const [failure, setFailure] = useState('')
   const [attempt, setAttempt] = useState(0)
@@ -190,7 +190,8 @@ export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: ()
 
   useEffect(() => {
     let active = true
-    fetch(`/api/ad-videos/${kind}`)
+    const query = activityId ? `?id=${encodeURIComponent(activityId)}` : ''
+    fetch(`/api/ad-videos/${kind}${query}`)
       .then(async (response) => {
         if (!response.ok) throw new Error(`Could not load the advertisement (HTTP ${response.status}).`)
         const result = await response.json() as AdVideoInfo
@@ -201,7 +202,7 @@ export function AdVideoOverlay({ kind, onDone }: { kind: AdVideoKind; onDone: ()
       })
       .catch((error) => { if (active) setFailure(error instanceof Error ? error.message : 'Could not load the advertisement.') })
     return () => { active = false }
-  }, [kind, attempt])
+  }, [kind, activityId, attempt])
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
@@ -225,6 +226,7 @@ function formatSize(bytes: number) {
 
 function AdVideoSlot({ kind, info, maxBytes, onChange }: { kind: AdVideoKind; info: AdVideoInfo; maxBytes: number; onChange: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const { title, description } = kindLabels[kind]
@@ -256,7 +258,6 @@ function AdVideoSlot({ kind, info, maxBytes, onChange }: { kind: AdVideoKind; in
   }
 
   async function remove() {
-    if (!window.confirm(`Remove the ${title.toLowerCase()}? Nothing will play afterwards.`)) return
     setBusy(true)
     setError('')
     setNotice('')
@@ -267,8 +268,10 @@ function AdVideoSlot({ kind, info, maxBytes, onChange }: { kind: AdVideoKind; in
         throw new Error(result.error || 'The video could not be removed.')
       }
       await onChange()
+      setConfirmingRemove(false)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The video could not be removed.')
+      setConfirmingRemove(false)
     } finally {
       setBusy(false)
     }
@@ -291,19 +294,33 @@ function AdVideoSlot({ kind, info, maxBytes, onChange }: { kind: AdVideoKind; in
           <Upload size={16} /> {busy ? 'Working…' : info.available ? 'Replace video' : 'Upload video'}
           <input type="file" accept="video/mp4,video/webm" hidden disabled={busy} onChange={(event) => void upload(event)} />
         </label>
-        {info.available && <button className="button button-quiet" type="button" onClick={() => void remove()} disabled={busy}><Trash2 size={16} /> Remove</button>}
+        {info.available && <button className="button button-quiet" type="button" onClick={() => setConfirmingRemove(true)} disabled={busy}><Trash2 size={16} /> Remove</button>}
       </div>
+      {confirmingRemove && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setConfirmingRemove(false) }}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby={`remove-ad-${kind}-title`}>
+            <button className="icon-button modal-close" type="button" onClick={() => setConfirmingRemove(false)} aria-label="Close" disabled={busy}><X size={19} /></button>
+            <div className="modal-kicker">VIDEO ADS</div>
+            <h2 id={`remove-ad-${kind}-title`}>Remove {title.toLowerCase()}?</h2>
+            <p className="share-question">Nothing will play afterwards for your activities until you upload a new video.</p>
+            <div className="create-game-actions">
+              <button className="button button-quiet" type="button" onClick={() => setConfirmingRemove(false)} disabled={busy}>Cancel</button>
+              <button className="button button-primary" type="button" autoFocus disabled={busy} onClick={() => void remove()}>{busy ? 'Working…' : 'Remove video'}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   )
 }
 
-export function AdVideoSettings({ username, onLogout }: { username: string; onLogout: () => void }) {
+export function AdVideoSettings({ username, role = 'admin', onLogout }: { username: string; role?: 'admin' | 'host'; onLogout: () => void }) {
   const [videos, setVideos] = useState<{ poll: AdVideoInfo; qa: AdVideoInfo; game: AdVideoInfo; selfie: AdVideoInfo; raffle: AdVideoInfo; scramble: AdVideoInfo; maxBytes: number } | null>(null)
   const [error, setError] = useState('')
 
   async function refresh() {
     try {
-      const response = await fetch('/api/admin/ad-videos')
+      const response = await fetch('/api/admin/ad-videos', { cache: 'no-store' })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Could not load the videos.')
       const missing = { available: false }
@@ -318,7 +335,7 @@ export function AdVideoSettings({ username, onLogout }: { username: string; onLo
 
   return (
     <main className="admin-shell">
-      <header className="admin-topbar"><ThemeBrand /><div className="admin-top-actions"><span>{username} · ADMIN</span><button className="icon-button signout-button" onClick={onLogout} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button></div></header>
+      <header className="admin-topbar"><ThemeBrand /><div className="admin-top-actions"><span>{username} · {role.toUpperCase()}</span><button className="icon-button signout-button" onClick={onLogout} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button></div></header>
       <div className="admin-content">
         <a className="admin-back" href="/">← Dashboard</a>
         <div className="admin-heading"><span className="auth-eyebrow">VIDEO ADS</span><h1>Videos</h1><p>Upload a separate MP4 or WebM for each activity. Viewers cannot skip, pause, or close these videos.</p></div>

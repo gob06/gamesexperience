@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import QRCode from 'qrcode'
 import { ArrowLeft, Camera, Check, Copy, ImagePlus, Maximize, Minimize, Pause, Play, QrCode, Trash2, Upload, X } from 'lucide-react'
-import { ThemeBrand } from './theme'
+import { getDisplayPresentation, ThemeBrand, useTheme } from './theme'
 import { AdVideoOverlay } from './AdVideo'
 import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
@@ -593,6 +593,7 @@ export default function SelfieCam() {
 }
 
 export function SelfieParticipant({ token }: { token: string }) {
+  const { theme, assetUrls } = useTheme()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const santaRef = useRef<HTMLCanvasElement>(null)
@@ -759,9 +760,11 @@ export function SelfieParticipant({ token }: { token: string }) {
     }
   }
 
+  const display = getDisplayPresentation(theme, assetUrls, 'selfie-submission')
+
   return (
-    <main className="selfie-shell">
-      {showAd && <AdVideoOverlay kind="selfie" onDone={() => setShowAd(false)} />}
+    <main className={`selfie-shell selfie-submission-shell ${display.className}`} style={display.style}>
+      {showAd && <AdVideoOverlay kind="selfie" activityId={token} onDone={() => setShowAd(false)} />}
       <div className="selfie-content">
         {bannerOk ? (
           <section className="selfie-guest-banner"><img src={`/api/selfie/join/${encodeURIComponent(token)}/banner`} alt="" onError={() => setBannerOk(false)} /></section>

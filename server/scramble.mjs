@@ -53,7 +53,7 @@ function isValidScramble(scrambled, answer) {
 }
 
 const selectGameSql = `
-  SELECT id, title, status, answer, scrambled,
+  SELECT id, title, ticket_label AS ticketLabel, status, answer, scrambled,
     answer_revealed_at AS answerRevealedAt,
     created_at AS createdAt, updated_at AS updatedAt,
     CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/logo?version=1') END AS logoUrl,
@@ -68,6 +68,7 @@ function publicGame(game) {
   return {
     id: game.id,
     title: game.title,
+    ticketLabel: game.ticketLabel ?? null,
     status: game.status,
     logoUrl: game.logoUrl,
     displayLogoUrl: game.displayLogoUrl,
@@ -85,6 +86,7 @@ function hostGame(game) {
   return {
     id: game.id,
     title: game.title,
+    ticketLabel: game.ticketLabel ?? null,
     status: game.status,
     logoUrl: game.logoUrl,
     displayLogoUrl: game.displayLogoUrl,
@@ -148,7 +150,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
 
   app.get('/api/scrambles', requireUser, async (request, response) => {
     const games = await database.prepare(`
-      SELECT scramble_games.id, scramble_games.title, scramble_games.status,
+      SELECT scramble_games.id, scramble_games.title, scramble_games.ticket_label AS ticketLabel, scramble_games.status,
         scramble_games.created_at AS createdAt,
         CASE WHEN scramble_games.logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', scramble_games.id, '/logo?version=1') END AS logoUrl,
         (SELECT COUNT(*) FROM scramble_entries WHERE game_id = scramble_games.id) AS entryCount,
@@ -162,9 +164,11 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
 
   app.post('/api/scrambles', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'displayLogo', maxCount: 1 }, { name: 'displayImage1', maxCount: 1 }, { name: 'displayImage2', maxCount: 1 }]), async (request, response) => {
     const title = typeof request.body.title === 'string' ? request.body.title.trim() : ''
+    const ticketLabel = typeof request.body.ticketLabel === 'string' ? request.body.ticketLabel.trim() : ''
     const answerInput = typeof request.body.answer === 'string' ? request.body.answer.normalize('NFKC').trim().replace(/\s+/g, ' ') : ''
     const scrambledInput = typeof request.body.scrambled === 'string' ? request.body.scrambled.normalize('NFKC').trim().replace(/\s+/g, ' ') : ''
     if (title.length < 3 || title.length > 120) return response.status(400).json({ error: 'Game title must be between 3 and 120 characters.' })
+    if (ticketLabel.length > 40) return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
     if (answerInput.length < 2 || answerInput.length > 120 || !answerPattern.test(answerInput)) return response.status(400).json({ error: 'Enter an answer word or phrase between 2 and 120 letters, numbers, and basic punctuation.' })
     const scrambled = scrambledInput ? scrambledInput.toUpperCase() : scrambleAnswer(answerInput)
     if (!isValidScramble(scrambled, answerInput)) return response.status(400).json({ error: 'The scrambled version must use exactly the same letters as the answer.' })
@@ -181,10 +185,10 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     const now = new Date().toISOString()
     const id = randomUUID()
     await database.prepare(`
-      INSERT INTO scramble_games (id, title, answer, scrambled, status, answer_revealed_at, logo_mime_type, logo, display_logo_mime_type, display_logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, title, answerInput, scrambled, logo?.mimetype || null, logo?.buffer || null, displayLogo?.mimetype || null, displayLogo?.buffer || null, displayImage1?.mimetype || null, displayImage1?.buffer || null, displayImage2?.mimetype || null, displayImage2?.buffer || null, request.user.id, now, now)
-    await audit(request, 'scramble.create', 'scramble', id, { title })
+      INSERT INTO scramble_games (id, title, ticket_label, answer, scrambled, status, answer_revealed_at, logo_mime_type, logo, display_logo_mime_type, display_logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, title, ticketLabel || null, answerInput, scrambled, logo?.mimetype || null, logo?.buffer || null, displayLogo?.mimetype || null, displayLogo?.buffer || null, displayImage1?.mimetype || null, displayImage1?.buffer || null, displayImage2?.mimetype || null, displayImage2?.buffer || null, request.user.id, now, now)
+    await audit(request, 'scramble.create', 'scramble', id, { title, ...(ticketLabel ? { ticketLabel } : {}) })
     response.status(201).json(hostGame(await getGame(id)))
   })
 
@@ -304,10 +308,11 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     if (!game) return response.status(404).json({ error: 'This word scramble could not be found.' })
     if (game.status === 'closed' || game.status === 'completed') return response.status(423).json({ error: 'Participation for this game has ended.' })
 
+    const fieldLabel = (game.ticketLabel || 'ticket number').toLowerCase()
     const participantName = typeof request.body?.participantName === 'string' ? request.body.participantName.trim().replace(/\s+/g, ' ') : ''
     const ticketNumber = typeof request.body?.ticketNumber === 'string' ? request.body.ticketNumber.trim() : ''
     if (!participantNamePattern.test(participantName)) return response.status(400).json({ error: 'Enter a name between 2 and 80 characters.' })
-    if (!ticketNumberPattern.test(ticketNumber)) return response.status(400).json({ error: 'Enter a ticket number using letters, numbers, spaces, dashes, slashes, or underscores.' })
+    if (!ticketNumberPattern.test(ticketNumber)) return response.status(400).json({ error: `Enter a ${fieldLabel} using letters, numbers, spaces, dashes, slashes, or underscores.` })
 
     const entry = { id: randomUUID(), registeredAt: new Date().toISOString() }
     try {
@@ -324,7 +329,13 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
       if (registered === 'missing') return response.status(404).json({ error: 'This word scramble could not be found.' })
       if (registered === 'ended') return response.status(423).json({ error: 'Participation for this game has ended.' })
     } catch (error) {
-      if (isDuplicateKeyError(error)) return response.status(409).json({ error: duplicateTicketMessage })
+      if (isDuplicateKeyError(error)) {
+        return response.status(409).json({
+          error: game.ticketLabel
+            ? `This ${fieldLabel} has already been registered. Duplicate entries are not allowed.`
+            : duplicateTicketMessage,
+        })
+      }
       throw error
     }
     response.status(201).json({ id: entry.id, participantName, ticketNumber, registeredAt: entry.registeredAt })

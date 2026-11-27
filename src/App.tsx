@@ -39,13 +39,13 @@ import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLib
 import SelfieCam, { SelfieParticipant } from './SelfieCam'
 import SelfieDisplay from './SelfieDisplay'
 import SelfieMonitor from './SelfieMonitor'
-import { ThemeBrand, useTheme } from './theme'
+import { getDisplayPresentation, ThemeBrand, useTheme } from './theme'
 import VanishingGame from './VanishingGame'
 import { RaffleDisplayPage, RaffleHostPage, RaffleJoinPage } from './Raffle'
 import { ScrambleDisplayPage, ScrambleHostPage, ScrambleJoinPage } from './Scramble'
 
 type PollOption = { id: string; label: string; votes: number; imageUrl?: string | null; hideLabel?: boolean }
-type Poll = { id: string; question: string; joinTitle?: string | null; questionImageUrl?: string | null; options: PollOption[]; createdAt: string; logoUrl?: string | null; isQa: boolean; winnerName?: string; winnerTicketNumber?: string; winnerAnswer?: string; votingEnabled: boolean; videoEnabled: boolean; revealCorrect?: boolean; correctOptionId?: string | null; stats?: { participants: number; submissions: number; winners: number; nonWinners: number } }
+type Poll = { id: string; question: string; joinTitle?: string | null; ticketLabel?: string | null; questionImageUrl?: string | null; options: PollOption[]; createdAt: string; logoUrl?: string | null; isQa: boolean; winnerName?: string; winnerTicketNumber?: string; winnerAnswer?: string; votingEnabled: boolean; videoEnabled: boolean; revealCorrect?: boolean; correctOptionId?: string | null; stats?: { participants: number; submissions: number; winners: number; nonWinners: number } }
 type AuthUser = { id: string; username: string; role: 'admin' | 'host'; isSuperAdmin: boolean }
 type OptionDraft = { label: string; imageFile: File | null; previewUrl: string; hideName: boolean }
 
@@ -189,6 +189,7 @@ function App() {
   const [audienceThankYou, setAudienceThankYou] = useState(hasAudienceThankYouCompleted)
   const [polls, setPolls] = useState<Poll[]>([])
   const [question, setQuestion] = useState('')
+  const [ticketLabel, setTicketLabel] = useState('')
   const [options, setOptions] = useState<OptionDraft[]>(emptyOptionDrafts)
   const [hideNames, setHideNames] = useState(false)
   const [correctOptionIndex, setCorrectOptionIndex] = useState<number | null>(null)
@@ -379,6 +380,7 @@ function App() {
       formData.append('question', question.trim())
       formData.append('isQa', String(isQaMode))
       formData.append('revealCorrect', String(isQaMode && revealCorrect))
+      if (isQaMode && ticketLabel.trim()) formData.append('ticketLabel', ticketLabel.trim())
       const optionImages: File[] = []
       formData.append('options', JSON.stringify(cleanOptions.map((option) => {
         const imageIndex = option.imageFile ? optionImages.push(option.imageFile) - 1 : null
@@ -395,6 +397,7 @@ function App() {
       if (!response.ok) throw new Error(result.error || 'Could not create this poll.')
       setPolls((current) => [result, ...current])
       setQuestion('')
+      setTicketLabel('')
       options.forEach((option) => { if (option.previewUrl) URL.revokeObjectURL(option.previewUrl) })
       setOptions(emptyOptionDrafts())
       setCorrectOptionIndex(null)
@@ -412,7 +415,7 @@ function App() {
     setSetupRequired(false)
     setAuthError('')
     window.dispatchEvent(new Event('account-theme-refresh'))
-    if (['/admin/users', '/admin/game-theme', '/admin/videos', '/admin/terms'].includes(window.location.pathname) && user.role !== 'admin') window.location.replace('/')
+    if (['/admin/users', '/admin/game-theme', '/admin/terms'].includes(window.location.pathname) && user.role !== 'admin') window.location.replace('/')
   }
 
   async function updatePollSettings(pollId: string, settings: Partial<Pick<Poll, 'votingEnabled' | 'videoEnabled' | 'revealCorrect'>>) {
@@ -480,9 +483,7 @@ function App() {
       : <AccessDeniedPage onLogout={() => void logout()} />
   }
   if (window.location.pathname === '/admin/videos') {
-    return authUser.role === 'admin'
-      ? <AdVideoSettings username={authUser.username} onLogout={() => void logout()} />
-      : <AccessDeniedPage onLogout={() => void logout()} />
+    return <AdVideoSettings username={authUser.username} role={authUser.role} onLogout={() => void logout()} />
   }
   if (window.location.pathname === '/admin/terms') {
     return authUser.role === 'admin'
@@ -557,6 +558,13 @@ function App() {
                   <button className="button button-secondary logo-picker-button" type="button" onClick={() => questionImageInputRef.current?.click()}>{questionImageFile ? 'Change' : 'Upload'}</button>
                   {questionImageFile && <button className="icon-button logo-remove-button" type="button" onClick={clearQuestionImage} aria-label="Remove question image"><X size={16} /></button>}
                 </div>
+              )}
+              {isQaMode && (
+                <>
+                  <label className="field-label" htmlFor="qa-ticket-label">Ticket number label</label>
+                  <input id="qa-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
+                  <span className="field-hint">Shown on guest registration and the open display. Leave blank for Ticket number.</span>
+                </>
               )}              <div className="poll-logo-field drop-zone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); acceptLogo(event.dataTransfer.files[0]) }}>
                 <input ref={logoInputRef} className="logo-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPollLogo} aria-label="Choose a logo for this poll's QR code" />
                 <div className="logo-preview-tile">{logoPreviewUrl ? <img src={logoPreviewUrl} alt="Selected QR logo preview" /> : <ImagePlus size={21} />}</div>
@@ -684,9 +692,9 @@ function ActivityDashboard({
         <ThemeBrand />
         <div className="topbar-actions">
           <a className="button button-quiet manage-users-link theme-settings-link" href="/admin/theme" aria-label="Appearance and theme settings" title="Appearance and theme settings"><Palette size={16} /> Appearance &amp; Theme Settings</a>
+          <a className="button button-quiet manage-users-link" href="/admin/videos" aria-label="Manage videos" title="Manage videos"><Film size={16} /> Videos</a>
           {user.role === 'admin' && <>
             <a className="button button-quiet manage-users-link" href="/admin/selfie"><Camera size={16} /> Selfie monitor</a>
-            <a className="button button-quiet manage-users-link" href="/admin/videos" aria-label="Manage videos" title="Manage videos"><Film size={16} /> Videos</a>
             <a className="button button-quiet manage-users-link" href="/admin/terms" aria-label="Edit Terms of Service" title="Edit Terms of Service"><FileText size={16} /> Terms</a>
             <a className="button button-quiet manage-users-link" href="/admin/users" aria-label="Manage users" title="Manage users"><Users size={16} /> Manage users</a>
           </>}
@@ -1066,12 +1074,17 @@ function PollEntry({ pollId }: { pollId: string }) {
     return () => { active = false }
   }, [pollId])
 
+  const { theme, assetUrls } = useTheme()
+  const fallbackDisplay = getDisplayPresentation(theme, assetUrls, 'poll-vote')
+
   if (poll?.isQa) return <QaAudience pollId={pollId} initialPoll={poll} />
   if (poll || failed) return <VotePage pollId={pollId} />
-  return <div className="vote-shell"><main className="vote-main"><div className="vote-card"><div className="skeleton-line" /></div></main></div>
+  return <div className={`vote-shell ${fallbackDisplay.className}`} style={fallbackDisplay.style}><main className="vote-main"><div className="vote-card"><div className="skeleton-line" /></div></main></div>
 }
 
 function VotePage({ pollId }: { pollId: string }) {
+  const { theme, assetUrls } = useTheme()
+  const display = getDisplayPresentation(theme, assetUrls, 'poll-vote')
   const [poll, setPoll] = useState<Poll | null>(null)
   const [selected, setSelected] = useState('')
   const [voted, setVoted] = useState(false)
@@ -1150,8 +1163,8 @@ function VotePage({ pollId }: { pollId: string }) {
   const totalVotes = poll?.options.reduce((total, option) => total + option.votes, 0) ?? 0
 
   return (
-    <div className="vote-shell vote-shell-centered">
-      {showAd && <AdVideoOverlay kind="poll" onDone={() => setShowAd(false)} />}
+    <div className={`vote-shell vote-shell-centered ${display.className}`} style={display.style}>
+      {showAd && <AdVideoOverlay kind="poll" activityId={pollId} onDone={() => setShowAd(false)} />}
       <main className="vote-main">
         {loading ? <div className="vote-card"><div className="skeleton-line" /><div className="skeleton-line short" /></div> : error && !poll ? (
           <div className="vote-card not-found"><div className="empty-icon"><CircleHelp size={21} /></div><h1>Poll not found.</h1><p>{error}</p><p>Check the QR code and try again.</p></div>
@@ -1186,6 +1199,7 @@ function VotePage({ pollId }: { pollId: string }) {
 }
 
 function ResultsDisplay({ pollId }: { pollId: string }) {
+  const { theme, assetUrls } = useTheme()
   const [poll, setPoll] = useState<Poll | null>(null)
   const [error, setError] = useState('')
   const [shareUrl, setShareUrl] = useState('')
@@ -1239,8 +1253,10 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
     return () => { active = false }
   }, [pollId])
 
+  const display = getDisplayPresentation(theme, assetUrls, poll?.isQa ? 'qa-display' : 'poll-display')
+
   if (!poll) {
-    return <main className="display-loading">{error || 'Loading live results…'}</main>
+    return <main className={`display-loading ${display.className}`} style={display.style}>{error || 'Loading live results…'}</main>
   }
 
   const totalVotes = poll.isQa ? 0 : poll.options.reduce((total, option) => total + option.votes, 0)
@@ -1250,7 +1266,7 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
   const questionSecondLine = questionWords.slice(questionSplit).join(' ')
 
   return (
-    <main className="display-shell">
+    <main className={`display-shell ${poll.isQa ? 'qa-display-shell' : 'poll-display-shell'} ${display.className}`} style={display.style}>
       <section className="display-heading">
         <div>
           {poll.questionImageUrl &&  <img className="question-image display-question-image" src={poll.questionImageUrl} alt={poll.question || 'Question'} />}
@@ -1269,7 +1285,7 @@ function ResultsDisplay({ pollId }: { pollId: string }) {
                 <>
                   <span className="qa-winner-trophy" aria-hidden="true">🏆</span>
                   <h2>{poll.winnerName}</h2>
-                  {poll.winnerTicketNumber && <p>Ticket number: <strong>{poll.winnerTicketNumber}</strong></p>}
+                  {poll.winnerTicketNumber && <p>{poll.ticketLabel?.trim() || 'Ticket number'}: <strong>{poll.winnerTicketNumber}</strong></p>}
                   {poll.winnerAnswer && <p>Correct answer: <strong>{poll.winnerAnswer}</strong></p>}
                 </>
               ) : <p>Be the first to answer correctly.</p>}

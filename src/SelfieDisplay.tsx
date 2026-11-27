@@ -4,11 +4,13 @@ import { Smartphone } from 'lucide-react'
 import { getSelfieJoinUrl } from './SelfieCam'
 import { initialCarouselState, selfieCarousel } from './selfieCarousel'
 import { readSelfieJson } from './selfieResponse'
+import { getDisplayPresentation, useTheme } from './theme'
 
 type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string; approvedAt?: string | null }
 type QrSession = { id: string; joinToken: string; paused: boolean }
 
 export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' }: { sessionId: string; joinToken: string; displayToken?: string }) {
+  const { theme, assetUrls } = useTheme()
   const qrRef = useRef<HTMLCanvasElement>(null)
   const [preparedQr, setPreparedQr] = useState({ token: '', url: '' })
   const [carousel, dispatch] = useReducer(selfieCarousel, initialCarouselState)
@@ -153,8 +155,10 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
     return () => window.clearTimeout(timer)
   }, [currentId, carousel.photos.length, carousel.pendingIds.length, carousel.paused, rotationSeconds])
 
+  const display = getDisplayPresentation(theme, assetUrls, 'selfie-display')
+
   return (
-    <main className={`selfie-display${!qrToken ? ' selfie-display-archive' : ''}`}>
+    <main className={`selfie-display${!qrToken ? ' selfie-display-archive' : ''} ${display.className}`} style={display.style}>
       <section className="selfie-display-wall" aria-label="Live guest photos">
         {!layers.length ? (
           <p className="selfie-display-empty">{error || (closed ? 'This selfie session has ended.' : 'Photos will appear here as guests send them.')}</p>

@@ -17,7 +17,7 @@ type Row = {
 }
 
 type Monitor = {
-  poll: { id: string; question: string; votingEnabled: boolean; revealCorrect: boolean; correctAnswer: string | null }
+  poll: { id: string; question: string; ticketLabel?: string | null; votingEnabled: boolean; revealCorrect: boolean; correctAnswer: string | null }
   stats: { participants: number; submissions: number; winners: number; nonWinners: number; participationPercentage: number; adCompletions: number }
   rows: Row[]
   generatedAt: string
@@ -48,7 +48,8 @@ export default function QaMonitor({ pollId, isAdmin }: { pollId: string; isAdmin
       if (seenWinners.current) {
         const fresh = next.rows.filter((row) => row.result === 'WIN' && !seenWinners.current?.has(row.sessionId))
         if (fresh.length) {
-          setToast(`🏆 New winner: ${fresh[0].fullName} · Ticket ${fresh[0].ticketNumber}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`)
+          const label = next.poll.ticketLabel?.trim() || 'Ticket'
+          setToast(`🏆 New winner: ${fresh[0].fullName} · ${label} ${fresh[0].ticketNumber}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}`)
           window.clearTimeout(toastTimer.current)
           toastTimer.current = window.setTimeout(() => setToast(''), 6000)
         }
@@ -117,7 +118,7 @@ export default function QaMonitor({ pollId, isAdmin }: { pollId: string; isAdmin
         {cards.map(([label, value]) => <article className="monitor-card" key={label}><strong>{value}</strong><span>{label}</span></article>)}
       </section>
       <section className="monitor-tools">
-        <label className="monitor-search"><Search size={16} /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or ticket number" aria-label="Search by name or ticket number" /></label>
+        <label className="monitor-search"><Search size={16} /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search name or ${(data.poll.ticketLabel?.trim() || 'ticket number').toLowerCase()}`} aria-label={`Search by name or ${(data.poll.ticketLabel?.trim() || 'ticket number').toLowerCase()}`} /></label>
         <div className="question-type-toggle" role="radiogroup" aria-label="Filter results">
           {(['all', 'winners', 'losers'] as const).map((value) => (
             <button key={value} type="button" role="radio" aria-checked={filter === value} className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>{value === 'all' ? 'All' : value === 'winners' ? 'Winners' : 'Non-winners'}</button>
@@ -129,7 +130,7 @@ export default function QaMonitor({ pollId, isAdmin }: { pollId: string; isAdmin
       <div className="monitor-table-wrap">
         <table className="monitor-table">
           <thead>
-            <tr><th>Rank</th><th>Participant</th><th>Ticket</th><th>Question</th><th>Answer</th><th>Result</th><th>Submitted</th><th>Ad</th><th>Verification</th></tr>
+            <tr><th>Rank</th><th>Participant</th><th>{data.poll.ticketLabel?.trim() || 'Ticket'}</th><th>Question</th><th>Answer</th><th>Result</th><th>Submitted</th><th>Ad</th><th>Verification</th></tr>
           </thead>
           <tbody>
             {rows.length === 0 && <tr><td colSpan={9} className="monitor-empty">No participants match yet.</td></tr>}

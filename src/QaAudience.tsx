@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check } from 'lucide-react'
-import { ThemeBrand } from './theme'
+import { getDisplayPresentation, ThemeBrand, useTheme } from './theme'
 import { TermsNotice } from './terms'
 import { AdVideoPlayer, ThankYouScreen } from './AdVideo'
 
 export type QaPoll = {
   id: string
   question: string
+  ticketLabel?: string | null
   questionImageUrl?: string | null
   options: Array<{ id: string; label: string; imageUrl?: string | null }>
   votingEnabled: boolean
@@ -102,9 +103,10 @@ function Confetti() {
   )
 }
 
-function ResultScreen({ pollId }: { pollId: string }) {
+function ResultScreen({ pollId, ticketLabel }: { pollId: string; ticketLabel?: string | null }) {
   const [result, setResult] = useState<QaResult | null>(null)
   const [error, setError] = useState('')
+  const fieldLabel = ticketLabel?.trim() || 'Ticket number'
 
   useEffect(() => {
     let active = true
@@ -127,7 +129,7 @@ function ResultScreen({ pollId }: { pollId: string }) {
       <p className="qa-lead">Congratulations, {result.fullName}! You answered correctly.</p>
       <dl className="qa-facts">
         <div><dt>Name</dt><dd>{result.fullName}</dd></div>
-        <div><dt>Ticket number</dt><dd>{result.ticketNumber}</dd></div>
+        <div><dt>{fieldLabel}</dt><dd>{result.ticketNumber}</dd></div>
         {result.correctAnswer && <div><dt>Correct answer</dt><dd>{result.correctAnswer}</dd></div>}
       </dl>
       <p className="qa-note">Show this screen to the event staff to claim your prize.</p>
@@ -139,7 +141,7 @@ function ResultScreen({ pollId }: { pollId: string }) {
       <p className="qa-lead">Sorry, {result.fullName}, that was not the correct answer.</p>
       <dl className="qa-facts">
         <div><dt>Name</dt><dd>{result.fullName}</dd></div>
-        <div><dt>Ticket number</dt><dd>{result.ticketNumber}</dd></div>
+        <div><dt>{fieldLabel}</dt><dd>{result.ticketNumber}</dd></div>
         <div><dt>Your answer</dt><dd>{result.selectedAnswer}</dd></div>
         {result.correctAnswer && <div><dt>Correct answer</dt><dd>{result.correctAnswer}</dd></div>}
       </dl>
@@ -148,6 +150,7 @@ function ResultScreen({ pollId }: { pollId: string }) {
 }
 
 export default function QaAudience({ pollId, initialPoll }: { pollId: string; initialPoll: QaPoll }) {
+  const { theme, assetUrls } = useTheme()
   const [poll, setPoll] = useState(initialPoll)
   const [session, setSession] = useState<QaSession | null>(null)
   const [fullName, setFullName] = useState('')
@@ -214,15 +217,16 @@ export default function QaAudience({ pollId, initialPoll }: { pollId: string; in
   } else if (session.submitted && !session.adCompleted) {
     body = <QaAdPlayer pollId={pollId} onCompleted={() => setSession((current) => current && { ...current, adCompleted: true })} />
   } else if (session.submitted) {
-    body = <ThankYouScreen><ResultScreen pollId={pollId} /></ThankYouScreen>
+    body = <ThankYouScreen><ResultScreen pollId={pollId} ticketLabel={poll.ticketLabel} /></ThankYouScreen>
   } else if (!session.registered) {
+    const ticketFieldLabel = poll.ticketLabel?.trim() || 'Ticket number'
     body = (
       <form className="vote-card qa-register" onSubmit={(event) => void register(event)}>
         <div className="vote-card-kicker"><span className="live-indicator" /> LIVE Q&amp;A</div>
         <h1>Join the game</h1>
         <p className="vote-instruction">{poll.votingEnabled ? 'Enter your details to see the question.' : 'This Q&A is not open yet. Check back soon.'}</p>
         <label className="qa-name-label" htmlFor="qa-full-name">Full name<input id="qa-full-name" className="qa-name-input" type="text" autoComplete="name" maxLength={80} value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your full name" required disabled={!poll.votingEnabled} /></label>
-        <label className="qa-name-label" htmlFor="qa-ticket-number">Ticket number<input id="qa-ticket-number" className="qa-name-input" type="text" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder="Your ticket number" required disabled={!poll.votingEnabled} /></label>
+        <label className="qa-name-label" htmlFor="qa-ticket-number">{ticketFieldLabel}<input id="qa-ticket-number" className="qa-name-input" type="text" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder={`Your ${ticketFieldLabel.toLowerCase()}`} required disabled={!poll.votingEnabled} /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="button button-primary submit-vote" type="submit" disabled={busy || !poll.votingEnabled || !fullName.trim() || !ticketNumber.trim()}>Continue <ArrowUpRight size={17} /></button>
                 <TermsNotice />
@@ -252,8 +256,10 @@ export default function QaAudience({ pollId, initialPoll }: { pollId: string; in
     )
   }
 
+  const display = getDisplayPresentation(theme, assetUrls, !session?.registered ? 'qa-register' : 'qa-play')
+
   return (
-    <div className="vote-shell">
+    <div className={`vote-shell qa-audience-shell ${display.className}`} style={display.style}>
       <header className="vote-topbar"><ThemeBrand /><span className="vote-top-label">LIVE Q&amp;A</span></header>
       <main className="vote-main">
         {body}

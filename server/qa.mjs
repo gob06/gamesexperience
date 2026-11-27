@@ -78,12 +78,12 @@ export function registerQaRoutes({
   }
 
   async function activeAd(poll) {
-    if (!poll.videoEnabled) return null
-    const video = await selectAdVideo('qa')
+    if (!poll?.videoEnabled || !poll.ownerUserId) return null
+    const video = await selectAdVideo('qa', poll.ownerUserId)
     if (!video) return null
     return {
       id: video.fileName,
-      url: `/api/ad-videos/qa/file?v=${encodeURIComponent(video.updatedAt)}`,
+      url: `/api/ad-videos/qa/file?id=${encodeURIComponent(poll.id)}&v=${encodeURIComponent(video.updatedAt)}`,
       durationSeconds: adDuration(video),
     }
   }
@@ -142,15 +142,16 @@ export function registerQaRoutes({
     response.set('Cache-Control', 'no-store')
     if (qaSession.ticketNumber) return response.json({ registered: true, fullName: qaSession.fullName, ticketNumber: qaSession.ticketNumber })
     if (!poll.votingEnabled) return response.status(423).json({ error: 'This Q&A is not accepting participants right now.' })
+    const fieldLabel = (poll.ticketLabel || 'ticket number').toLowerCase()
     const fullName = typeof request.body?.fullName === 'string' ? request.body.fullName.trim().replace(/\s+/g, ' ') : ''
     const ticketNumber = typeof request.body?.ticketNumber === 'string' ? request.body.ticketNumber.trim() : ''
     if (!namePattern.test(fullName)) return response.status(400).json({ error: 'Enter your full name (2–80 letters; no symbols).' })
-    if (!ticketPattern.test(ticketNumber)) return response.status(400).json({ error: 'Enter a valid ticket number (letters, numbers, dashes; up to 40 characters).' })
+    if (!ticketPattern.test(ticketNumber)) return response.status(400).json({ error: `Enter a valid ${fieldLabel} (letters, numbers, dashes; up to 40 characters).` })
     try {
       await database.prepare('UPDATE poll_voting_sessions SET full_name = ?, ticket_number = ?, ticket_key = ?, registered_at = ? WHERE id = ? AND ticket_key IS NULL')
         .run(fullName, ticketNumber, ticketNumber.toUpperCase(), new Date().toISOString(), qaSession.id)
     } catch (error) {
-      if (isDuplicateKeyError(error)) return response.status(409).json({ error: 'This ticket number has already been used for this Q&A.' })
+      if (isDuplicateKeyError(error)) return response.status(409).json({ error: `This ${fieldLabel} has already been used for this Q&A.` })
       throw error
     }
     notify(poll.id)
@@ -162,7 +163,7 @@ export function registerQaRoutes({
     const { poll, qaSession } = request
     response.set('Cache-Control', 'no-store')
     if (!poll.votingEnabled) return response.status(423).json({ error: 'This Q&A is not accepting answers right now.' })
-    if (!qaSession.ticketNumber) return response.status(403).json({ error: 'Enter your name and ticket number first.' })
+    if (!qaSession.ticketNumber) return response.status(403).json({ error: `Enter your name and ${(poll.ticketLabel || 'ticket number').toLowerCase()} first.` })
     const optionId = request.body?.optionId
     if (typeof optionId !== 'string' || optionId.length > 80) return response.status(400).json({ error: 'Choose one answer.' })
 
@@ -296,7 +297,7 @@ export function registerQaRoutes({
     const winners = rows.filter((row) => row.result === 'WIN').length
     return {
       poll: {
-        id: poll.id, question: poll.question, votingEnabled: poll.votingEnabled, revealCorrect: poll.revealCorrect,
+        id: poll.id, question: poll.question, ticketLabel: poll.ticketLabel ?? null, votingEnabled: poll.votingEnabled, revealCorrect: poll.revealCorrect,
         correctAnswer: poll.options.find((option) => option.id === poll.correctOptionId)?.label ?? null,
       },
       stats: {
@@ -372,6 +373,8 @@ export function registerQaRoutes({
     if (body.revealCorrect !== undefined && typeof body.revealCorrect !== 'boolean') return response.status(400).json({ error: 'Reveal setting must be true or false.' })
     const joinTitle = body.joinTitle === undefined ? undefined : typeof body.joinTitle === 'string' ? body.joinTitle.trim() : null
     if (joinTitle === null || (joinTitle !== undefined && joinTitle.length > 80)) return response.status(400).json({ error: 'The join title must be 80 characters or fewer.' })
+    const ticketLabel = body.ticketLabel === undefined ? undefined : typeof body.ticketLabel === 'string' ? body.ticketLabel.trim() : null
+    if (ticketLabel === null || (ticketLabel !== undefined && ticketLabel.length > 40)) return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
     const optionRows = await database.prepare('SELECT id, CASE WHEN image IS NULL THEN 0 ELSE 1 END AS hasImage FROM poll_options WHERE poll_id = ?').all(poll.id)
     const optionsById = new Map(optionRows.map((option) => [option.id, option]))
     const optionIds = new Set(optionsById.keys())
@@ -387,6 +390,7 @@ export function registerQaRoutes({
     await inTransaction(async () => {
       if (question !== undefined) await database.prepare('UPDATE polls SET question = ? WHERE id = ?').run(question, poll.id)
       if (joinTitle !== undefined) await database.prepare('UPDATE polls SET join_title = ? WHERE id = ?').run(joinTitle || null, poll.id)
+      if (ticketLabel !== undefined) await database.prepare('UPDATE polls SET ticket_label = ? WHERE id = ?').run(ticketLabel || null, poll.id)
       if (body.revealCorrect !== undefined) await database.prepare('UPDATE polls SET reveal_correct = ? WHERE id = ?').run(Number(body.revealCorrect), poll.id)
       if (body.correctOptionId !== undefined) await database.prepare('UPDATE polls SET correct_option_id = ? WHERE id = ?').run(body.correctOptionId, poll.id)
       for (const option of labels) await database.prepare('UPDATE poll_options SET label = ? WHERE id = ? AND poll_id = ?').run(option.label, option.id, poll.id)

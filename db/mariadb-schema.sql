@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS polls (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 ALTER TABLE polls ADD COLUMN IF NOT EXISTS join_title VARCHAR(80) NULL;
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS ticket_label VARCHAR(40) NULL;
 ALTER TABLE polls ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(64) NULL;
 
 CREATE TABLE IF NOT EXISTS poll_options (
@@ -211,6 +212,8 @@ CREATE TABLE IF NOT EXISTS game_rooms (
   INDEX game_rooms_updated_at (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+ALTER TABLE game_rooms ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(64) NULL;
+
 CREATE TABLE IF NOT EXISTS theme_settings (
   id TINYINT NOT NULL PRIMARY KEY,
   draft_json TEXT NOT NULL,
@@ -305,6 +308,9 @@ CREATE TABLE IF NOT EXISTS theme_assets (
   FOREIGN KEY (uploaded_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+ALTER TABLE theme_assets ADD COLUMN IF NOT EXISTS asset_kind VARCHAR(16) NOT NULL DEFAULT 'image';
+ALTER TABLE theme_assets ADD COLUMN IF NOT EXISTS original_name VARCHAR(255) NULL;
+
 CREATE TABLE IF NOT EXISTS theme_audit_logs (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
   administrator_id VARCHAR(64) NOT NULL,
@@ -334,6 +340,7 @@ ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_2_mime_type V
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_image_2 LONGBLOB NULL;
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS draw_winner_count INT NOT NULL DEFAULT 1;
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS reset_version VARCHAR(64) NULL;
+ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS ticket_label VARCHAR(40) NULL;
 
 CREATE TABLE IF NOT EXISTS raffle_entries (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -374,6 +381,7 @@ ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_1_mime_type VA
 ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_1 LONGBLOB NULL;
 ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_2_mime_type VARCHAR(100) NULL;
 ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_2 LONGBLOB NULL;
+ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS ticket_label VARCHAR(40) NULL;
 
 CREATE TABLE IF NOT EXISTS scramble_entries (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -393,4 +401,17 @@ CREATE TABLE IF NOT EXISTS scramble_entries (
   INDEX scramble_entries_game_answered (game_id, answered_at),
   INDEX scramble_entries_game_selected (game_id, selected_at),
   FOREIGN KEY (game_id) REFERENCES scramble_games(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS account_ad_videos (
+  user_id VARCHAR(64) NOT NULL,
+  kind VARCHAR(16) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  original_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(100) NOT NULL,
+  size BIGINT NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  PRIMARY KEY (user_id, kind),
+  CHECK (kind IN ('poll', 'qa', 'game', 'selfie', 'raffle', 'scramble')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

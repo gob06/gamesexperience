@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Gamepad2 } from 'lucide-react'
 import { AdVideoOverlay } from './AdVideo'
-import { useTheme } from './theme'
+import { getDisplayPresentation, useTheme } from './theme'
 import { TermsNotice } from './terms'
 
 type Player = 'X' | 'O'
@@ -165,27 +165,11 @@ export default function VanishingGame({ roomId }: { roomId?: string }) {
     : myTurn ? 'Your turn' : `${game.nextPlayer === 'X' ? game.playerXName : game.playerOName}'s turn`
   const myRematchVote = game?.youAre ? game.rematchVotes[game.youAre] : null
   const opponentRematchVote = game?.youAre ? game.rematchVotes[game.youAre === 'X' ? 'O' : 'X'] : null
-  const gameBackgroundUrl = gameThemeAssetUrls.background || gameThemeAssetUrls.adminBackground || gameThemeAssetUrls.resultsBackground || gameThemeAssetUrls.votingBackground
-  const gameShellStyle = {
-    '--theme-primary': gameTheme.colors.primary,
-    '--theme-secondary': gameTheme.colors.secondary,
-    '--theme-accent': gameTheme.colors.accent,
-    '--theme-background': gameTheme.colors.background,
-    '--theme-text': gameTheme.colors.text,
-    '--theme-radius': `${gameTheme.background.borderRadius}px`,
-    '--theme-glow': gameTheme.background.glow,
-    backgroundColor: gameTheme.colors.background,
-    backgroundImage: gameBackgroundUrl
-      ? `linear-gradient(rgba(0,0,0,${gameTheme.background.overlay}),rgba(0,0,0,${gameTheme.background.overlay})),linear-gradient(rgba(0,0,0,${1 - gameTheme.background.opacity}),rgba(0,0,0,${1 - gameTheme.background.opacity})),url("${gameBackgroundUrl.replaceAll('"', '')}")`
-      : 'radial-gradient(ellipse at 18% 0%, #272832 0%, transparent 42%)',
-    backgroundSize: gameTheme.background.size === 'repeat' ? 'auto' : gameTheme.background.size,
-    backgroundRepeat: gameTheme.background.size === 'repeat' ? 'repeat' : 'no-repeat',
-    backgroundPosition: gameTheme.background.position,
-  } as CSSProperties
+  const display = getDisplayPresentation(gameTheme, gameThemeAssetUrls, isJoinPage ? 'game-join' : 'game-match')
 
   return (
-    <main className="game-shell" style={gameShellStyle}>
-      {showAd && <AdVideoOverlay kind="game" onDone={() => setShowAd(false)} />}
+    <main className={`game-shell ${display.className}`} style={display.style}>
+      {showAd && <AdVideoOverlay kind="game" activityId={activeRoomId} onDone={() => setShowAd(false)} />}
       <header className="game-topbar">
         <a className="brand" href="/" aria-label={`${gameTheme.eventTitle} home`}>
           {gameThemeAssetUrls.logo && <img className="theme-brand-logo" src={gameThemeAssetUrls.logo} alt="" />}
