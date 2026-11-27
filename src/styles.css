@@ -1903,7 +1903,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-event:has(.raffle-screen-side-image) h1 { grid-column: 2; grid-row: 1; }
 .raffle-screen-event:has(.display-event-title-image) { width: 100%; }
 .raffle-screen-event h1:has(.display-event-title-image), .scramble-screen-title:has(.display-event-title-image) { width: 100%; min-width: 0; display: block; line-height: 0; }
-.display-event-title-image { display: block; width: 900px; max-width: 100%; height: auto; aspect-ratio: 5 / 1; object-fit: contain; margin: 0 auto; }
+.display-event-title-image { display: block; width: 900px; max-width: 100%; height: auto; aspect-ratio: 9 / 2; object-fit: contain; margin: 0 auto; }
 .raffle-screen-side-image { grid-row: 1; }
 
 .raffle-winner-count { display: flex; align-items: center; gap: 12px; color: #d6d3db; font-size: 14px; }
@@ -2004,7 +2004,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .scramble-screen-title { max-width: 100%; margin: 0; font-size: 120px; font-weight: 800; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .scramble-screen-event { width: 100%; flex-shrink: 0; }
 .scramble-screen-event .scramble-screen-title { color: inherit; font: inherit; font-size: 120px; font-weight: 800; line-height: normal; letter-spacing: -.02em; text-shadow: none; }
-.scramble-screen-logo { display: block; flex-shrink: 0; width: 900px; height: auto; aspect-ratio: 5 / 1; max-width: 100%; object-fit: contain; object-position: center; }
+.scramble-screen-logo { display: block; flex-shrink: 0; width: 900px; height: auto; aspect-ratio: 9 / 2; max-width: 100%; object-fit: contain; object-position: center; }
 .scramble-screen-subtitle { display: inline-flex; align-items: center; gap: 12px; margin: 0; color: var(--theme-primary, #d9f7a2); font-size: clamp(17px, 2.8vh, 32px); font-weight: 700; letter-spacing: .1em; }
 .scramble-screen-qr canvas { display: block; width: min(58vmin, 760px) !important; height: min(58vmin, 760px) !important; aspect-ratio: 1; border-radius: 14px; background: #fff; }
 .scramble-screen-stage .scramble-word { gap: clamp(8px, 1.4vw, 18px); }

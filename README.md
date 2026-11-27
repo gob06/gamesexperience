@@ -45,7 +45,7 @@ Raffle and word scramble open displays show ticket values without the ticket-num
 
 When creating a raffle or word scramble, choose text or an uploaded/image-bank image for the event name on the open display. Text mode requires an activity name; image mode requires an image and makes the activity name optional. If left blank in image mode, host and guest pages use "QR Raffle" or "QR Word Scramble". The QR logo is separate. Existing activities continue to show their text name. Images must be JPEG, PNG, or WebP (up to 5 MB); restart the API after updating to add the new database columns.
 
-Event-name logos use a centered 900 x 180 px image area on raffle and word scramble open displays. Images fit without cropping or stretching. The area scales down proportionally when the screen or center column between side images is narrower than 900 px.
+Event-name logos use a centered 900 x 200 px image area on raffle and word scramble open displays. Images fit without cropping or stretching. The area scales down proportionally when the screen or center column between side images is narrower than 900 px.
 
 In Appearance, the raffle, word scramble, and Selfie Cam display settings offer optional box color and opacity controls. They affect the open display only; Selfie Cam applies them to both the photo wall and QR panel while keeping the QR code readable. Save and publish the theme to make changes visible to guests.
 
