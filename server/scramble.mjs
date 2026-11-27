@@ -58,6 +58,7 @@ const selectGameSql = `
     created_at AS createdAt, updated_at AS updatedAt,
     CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/logo?version=1') END AS logoUrl,
     CASE WHEN display_logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/display-logo?version=1') END AS displayLogoUrl,
+    CASE WHEN display_title_image IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/display-title-image?version=1') END AS displayTitleImageUrl,
     CASE WHEN display_image_1 IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/display-image/1?version=1') END AS displayImage1Url,
     CASE WHEN display_image_2 IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/display-image/2?version=1') END AS displayImage2Url
   FROM scramble_games
@@ -73,6 +74,7 @@ function publicGame(game) {
     status: game.status,
     logoUrl: game.logoUrl,
     displayLogoUrl: game.displayLogoUrl,
+    displayTitleImageUrl: game.displayTitleImageUrl,
     displayImage1Url: game.displayImage1Url,
     displayImage2Url: game.displayImage2Url,
     // The scrambled word stays private until the host starts the game.
@@ -92,6 +94,7 @@ function hostGame(game) {
     status: game.status,
     logoUrl: game.logoUrl,
     displayLogoUrl: game.displayLogoUrl,
+    displayTitleImageUrl: game.displayTitleImageUrl,
     displayImage1Url: game.displayImage1Url,
     displayImage2Url: game.displayImage2Url,
     answer: game.answer,
@@ -164,7 +167,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     response.json(games)
   })
 
-  app.post('/api/scrambles', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'displayLogo', maxCount: 1 }, { name: 'displayImage1', maxCount: 1 }, { name: 'displayImage2', maxCount: 1 }]), async (request, response) => {
+  app.post('/api/scrambles', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'displayLogo', maxCount: 1 }, { name: 'displayTitleImage', maxCount: 1 }, { name: 'displayImage1', maxCount: 1 }, { name: 'displayImage2', maxCount: 1 }]), async (request, response) => {
     const title = typeof request.body.title === 'string' ? request.body.title.trim() : ''
     const ticketLabel = typeof request.body.ticketLabel === 'string' ? request.body.ticketLabel.trim() : ''
     const nameLabel = request.body.nameLabel === undefined ? '' : typeof request.body.nameLabel === 'string' ? request.body.nameLabel.trim() : null
@@ -178,20 +181,21 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     if (!isValidScramble(scrambled, answerInput)) return response.status(400).json({ error: 'The scrambled version must use exactly the same letters as the answer.' })
     const logo = request.files?.logo?.[0]
     const displayLogo = request.files?.displayLogo?.[0]
+    const displayTitleImage = request.files?.displayTitleImage?.[0]
     const displayImage1 = request.files?.displayImage1?.[0]
     const displayImage2 = request.files?.displayImage2?.[0]
     if (logo && !hasValidImageSignature(logo.mimetype, logo.buffer)) return response.status(400).json({ error: 'QR logo is not a valid JPEG, PNG, or WebP image.' })
     if (displayLogo && !hasValidImageSignature(displayLogo.mimetype, displayLogo.buffer)) return response.status(400).json({ error: 'Display logo is not a valid JPEG, PNG, or WebP image.' })
-    for (const [image, label] of [[displayImage1, 'Display image 1'], [displayImage2, 'Display image 2']]) {
+    for (const [image, label] of [[displayTitleImage, 'Display event name image'], [displayImage1, 'Display image 1'], [displayImage2, 'Display image 2']]) {
       if (image && !hasValidImageSignature(image.mimetype, image.buffer)) return response.status(400).json({ error: `${label} is not a valid JPEG, PNG, or WebP image.` })
     }
 
     const now = new Date().toISOString()
     const id = randomUUID()
     await database.prepare(`
-      INSERT INTO scramble_games (id, title, ticket_label, name_label, answer, scrambled, status, answer_revealed_at, logo_mime_type, logo, display_logo_mime_type, display_logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, title, ticketLabel || null, nameLabel || null, answerInput, scrambled, logo?.mimetype || null, logo?.buffer || null, displayLogo?.mimetype || null, displayLogo?.buffer || null, displayImage1?.mimetype || null, displayImage1?.buffer || null, displayImage2?.mimetype || null, displayImage2?.buffer || null, request.user.id, now, now)
+      INSERT INTO scramble_games (id, title, ticket_label, name_label, answer, scrambled, status, answer_revealed_at, logo_mime_type, logo, display_logo_mime_type, display_logo, display_title_image_mime_type, display_title_image, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, title, ticketLabel || null, nameLabel || null, answerInput, scrambled, logo?.mimetype || null, logo?.buffer || null, displayLogo?.mimetype || null, displayLogo?.buffer || null, displayTitleImage?.mimetype || null, displayTitleImage?.buffer || null, displayImage1?.mimetype || null, displayImage1?.buffer || null, displayImage2?.mimetype || null, displayImage2?.buffer || null, request.user.id, now, now)
     await audit(request, 'scramble.create', 'scramble', id, { title, ...(ticketLabel ? { ticketLabel } : {}), ...(nameLabel ? { nameLabel } : {}) })
     response.status(201).json(hostGame(await getGame(id)))
   })
@@ -214,6 +218,12 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     const logo = await database.prepare('SELECT display_logo_mime_type AS mimeType, display_logo AS logo FROM scramble_games WHERE id = ?').get(request.params.id)
     if (!logo?.logo) return response.status(404).end()
     response.type(logo.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(logo.logo))
+  })
+
+  app.get('/api/scrambles/:id/display-title-image', async (request, response) => {
+    const image = await database.prepare('SELECT display_title_image_mime_type AS mimeType, display_title_image AS image FROM scramble_games WHERE id = ?').get(request.params.id)
+    if (!image?.image) return response.status(404).end()
+    response.type(image.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(image.image))
   })
 
   app.get('/api/scrambles/:id/display-image/:slot', async (request, response) => {

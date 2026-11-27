@@ -1032,7 +1032,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                     <h3>Latest Draw Winner</h3>
                     <div className="theme-preview-winner-box">
                       <strong>Jordan Reyes</strong>
-                      <span>TICKET #A-1042</span>
+                      <span>#A-1042</span>
                     </div>
                   </>
                 ) : activePreviewTarget === 'qa-display' || activePreviewTarget === 'qa-play' ? (

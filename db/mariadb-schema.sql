@@ -343,6 +343,8 @@ ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS draw_winner_count INT NOT N
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS reset_version VARCHAR(64) NULL;
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS ticket_label VARCHAR(40) NULL;
 ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS name_label VARCHAR(40) NULL;
+ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_title_image_mime_type VARCHAR(100) NULL;
+ALTER TABLE raffle_sessions ADD COLUMN IF NOT EXISTS display_title_image LONGBLOB NULL;
 
 CREATE TABLE IF NOT EXISTS raffle_entries (
   id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -385,6 +387,8 @@ ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_2_mime_type VA
 ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_image_2 LONGBLOB NULL;
 ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS ticket_label VARCHAR(40) NULL;
 ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS name_label VARCHAR(40) NULL;
+ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_title_image_mime_type VARCHAR(100) NULL;
+ALTER TABLE scramble_games ADD COLUMN IF NOT EXISTS display_title_image LONGBLOB NULL;
 
 CREATE TABLE IF NOT EXISTS scramble_entries (
   id VARCHAR(64) NOT NULL PRIMARY KEY,

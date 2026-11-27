@@ -10,6 +10,7 @@ import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 import { DisplayWinners } from './DisplayWinners'
 import { DisplayImagePicker } from './DisplayImagePicker'
+import { DisplayEventTitle, DisplayEventTitleChoice } from './DisplayEventTitle'
 
 type ScrambleStatus = 'draft' | 'active' | 'paused' | 'closed' | 'completed'
 
@@ -32,6 +33,7 @@ type PublicScramble = {
   status: ScrambleStatus
   logoUrl: string | null
   displayLogoUrl: string | null
+  displayTitleImageUrl?: string | null
   displayImage1Url: string | null
   displayImage2Url: string | null
   scrambled: string | null
@@ -108,7 +110,7 @@ function WinnerDisplayHeading({ game }: { game: PublicScramble }) {
   return (
     <header className="raffle-screen-event scramble-screen-event">
       {game.displayImage1Url && <img className="raffle-screen-side-image is-left" src={game.displayImage1Url} alt="" />}
-      <h1 className="scramble-screen-title">{game.title}</h1>
+      <DisplayEventTitle className="scramble-screen-title" title={game.title} imageUrl={game.displayTitleImageUrl} />
       {game.displayImage2Url && <img className="raffle-screen-side-image is-right" src={game.displayImage2Url} alt="" />}
     </header>
   )
@@ -454,7 +456,7 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
       {screen === 'word' && (
         <section className="scramble-screen-stage" aria-live="polite">
           {game.displayLogoUrl && <img className="scramble-screen-logo" src={game.displayLogoUrl} alt="Event logo" />}
-          <h1 className="scramble-screen-title">{game.title}</h1>
+          <DisplayEventTitle className="scramble-screen-title" title={game.title} imageUrl={game.displayTitleImageUrl} />
           {game.status === 'paused' && <span className="scramble-screen-badge">GAME PAUSED</span>}
           {game.status === 'closed' && <span className="scramble-screen-badge">SUBMISSIONS CLOSED</span>}
           {game.scrambled && <ScrambledWord word={game.scrambled} />}
@@ -472,7 +474,7 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
       {screen === 'reveal' && (
         <section className="scramble-screen-stage" aria-live="polite">
           {game.displayLogoUrl && <img className="scramble-screen-logo" src={game.displayLogoUrl} alt="Event logo" />}
-          <h1 className="scramble-screen-title">{game.title}</h1>
+          <DisplayEventTitle className="scramble-screen-title" title={game.title} imageUrl={game.displayTitleImageUrl} />
           <p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p>
           <div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer || ''} /></div>
         </section>
@@ -481,17 +483,17 @@ export function ScrambleDisplayPage({ gameId }: { gameId: string }) {
         <section className="scramble-screen-stage" aria-live="polite">
           <WinnerDisplayHeading game={game} />
           {game.revealedAnswer && <div className="scramble-screen-answer"><p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p><div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer} /></div></div>}
-          <DisplayWinners winners={announcedWinners} ticketLabel={game.ticketLabel} />
+          <DisplayWinners winners={announcedWinners} />
         </section>
       )}
       {screen === 'completed' && (
         <section className="scramble-screen-stage" aria-live="polite">
           {!announcedWinners.length && game.displayLogoUrl && <img className="scramble-screen-logo" src={game.displayLogoUrl} alt="Event logo" />}
-          {announcedWinners.length ? <WinnerDisplayHeading game={game} /> : <h1 className="scramble-screen-title">{game.title}</h1>}
+          {announcedWinners.length ? <WinnerDisplayHeading game={game} /> : <DisplayEventTitle className="scramble-screen-title" title={game.title} imageUrl={game.displayTitleImageUrl} />}
           <p className="scramble-screen-subtitle">THANK YOU FOR PLAYING!</p>
           {game.revealedAnswer && <div className="scramble-screen-answer"><p className="scramble-screen-subtitle">THE CORRECT ANSWER IS</p><div className="scramble-screen-reveal"><ScrambledWord word={game.revealedAnswer} /></div></div>}
           {announcedWinners.length > 0 && (
-            <DisplayWinners winners={announcedWinners} ticketLabel={game.ticketLabel} />
+            <DisplayWinners winners={announcedWinners} />
           )}
         </section>
       )}
@@ -507,6 +509,8 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
   const [tab, setTab] = useState<ScrambleTab>('qr')
 
   const [title, setTitle] = useState('')
+  const [useTitleImage, setUseTitleImage] = useState(false)
+  const [titleImage, setTitleImage] = useState<File | null>(null)
   const [ticketLabel, setTicketLabel] = useState('')
   const [nameLabel, setNameLabel] = useState('')
   const [answerDraft, setAnswerDraft] = useState('')
@@ -607,6 +611,10 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
 
   async function createGame(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (useTitleImage && !titleImage) {
+      setError('Choose an image for the open display event name.')
+      return
+    }
     setCreating(true)
     setError('')
     setNotice('')
@@ -616,6 +624,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
     if (nameLabel.trim()) body.append('nameLabel', nameLabel.trim())
     body.append('answer', answerDraft.trim())
     if (logoFile) body.append('logo', logoFile)
+    if (useTitleImage && titleImage) body.append('displayTitleImage', titleImage)
     if (displayImage1) body.append('displayImage1', displayImage1)
     if (displayImage2) body.append('displayImage2', displayImage2)
     try {
@@ -623,6 +632,8 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
       setGames((current) => [{ id: created.id, title: created.title, ticketLabel: created.ticketLabel, status: created.status, createdAt: created.createdAt, logoUrl: created.logoUrl, entryCount: 0, winnerCount: 0 }, ...current])
       setSelectedId(created.id)
       setTitle('')
+      setUseTitleImage(false)
+      setTitleImage(null)
       setTicketLabel('')
       setNameLabel('')
       setAnswerDraft('')
@@ -826,12 +837,13 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
               <h2>Create a word scramble</h2>
               <label htmlFor="scramble-title">Event or game name</label>
               <input id="scramble-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={3} maxLength={120} placeholder="e.g. Lay Bare x PVL Game Night" required />
+              <DisplayEventTitleChoice useImage={useTitleImage} onModeChange={setUseTitleImage} file={titleImage} onChange={setTitleImage} onError={setError} />
               <label htmlFor="scramble-name-label">Guest name field label</label>
               <input id="scramble-name-label" value={nameLabel} onChange={(event) => setNameLabel(event.target.value)} maxLength={40} placeholder="Your name" />
               <p className="raffle-help">Shown on guest registration. Leave blank for Your name.</p>
               <label htmlFor="scramble-ticket-label">Ticket number label</label>
               <input id="scramble-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
-              <p className="raffle-help">Shown on guest registration and the open display. Leave blank for Ticket number.</p>
+              <p className="raffle-help">Shown on guest registration and host pages. Leave blank for Ticket number.</p>
               <label htmlFor="scramble-answer-input">Correct word or phrase</label>
               <input id="scramble-answer-input" value={answerDraft} onChange={(event) => setAnswerDraft(event.target.value)} minLength={2} maxLength={120} placeholder="e.g. CHAMPIONS" autoComplete="off" required />
               <p className="raffle-help">The answer stays private on the server. A scrambled version is generated automatically and can be edited before the game starts.</p>

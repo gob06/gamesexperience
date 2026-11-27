@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { ImagePlus, X } from 'lucide-react'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 
-export function DisplayImagePicker({ label, file, onChange, onError }: { label: string; file: File | null; onChange: (file: File | null) => void; onError: (message: string) => void }) {
+export function DisplayImagePicker({ label, file, onChange, onError, required = false }: { label: string; file: File | null; onChange: (file: File | null) => void; onError: (message: string) => void; required?: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const selectionRef = useRef(0)
   const [preview, setPreview] = useState('')
@@ -47,7 +47,7 @@ export function DisplayImagePicker({ label, file, onChange, onError }: { label: 
       <input ref={inputRef} className="raffle-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={choose} aria-label={`Upload ${label.toLowerCase()}`} />
       <div className="raffle-logo-row">
         <span className="raffle-logo-preview">{preview ? <img src={preview} alt={`${label} preview`} /> : <ImagePlus size={19} />}</span>
-        <span className="raffle-logo-name">{file?.name || `${label} · optional`}</span>
+        <span className="raffle-logo-name">{file?.name || `${label} · ${required ? 'required' : 'optional'}`}</span>
         <button className="button button-secondary raffle-upload-button" type="button" onClick={() => inputRef.current?.click()}>{file ? 'Change' : 'Upload'}</button>
         {file && <button className="icon-button" type="button" onClick={() => { selectionRef.current++; onChange(null) }} aria-label={`Remove ${label.toLowerCase()}`}><X size={15} /></button>}
       </div>

@@ -1216,6 +1216,9 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-create-form { display: grid; min-width: 0; gap: 9px; }
 .raffle-create-form h2, .raffle-session-list h2 { margin: 0 0 5px; color: #f7f0eb; font: 600 19px/1.2 'Fraunces', Georgia, serif; }
 .raffle-create-form label { color: #d7ced6; font-size: 12px; }
+.display-title-choice { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; padding: 0; border: 0; }
+.display-title-choice legend { margin-bottom: 6px; color: #d7ced6; font-size: 12px; }
+.display-title-choice label { display: inline-flex; align-items: center; gap: 5px; }
 .raffle-create-form > input:not([type="file"]) { width: 100%; min-width: 0; min-height: 42px; padding: 0 11px; border: 1px solid #4d4651; border-radius: 5px; outline: 0; background: #141319; color: #f7f0ed; }
 .raffle-create-form > input:focus { border-color: #68ceda; box-shadow: 0 0 0 3px #68ceda26; }
 .raffle-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -1898,6 +1901,7 @@ input::placeholder, textarea::placeholder { color: #827b85; }
 .raffle-screen-side-image.is-right { grid-column: 3; justify-self: end; }
 .raffle-screen-event:has(.raffle-screen-side-image) { width: 100%; grid-template-columns: minmax(0, 18vw) minmax(0, 1fr) minmax(0, 18vw); align-items: center; }
 .raffle-screen-event:has(.raffle-screen-side-image) h1 { grid-column: 2; grid-row: 1; }
+.display-event-title-image { display: block; width: auto; max-width: min(100%, 760px); height: clamp(64px, 14vh, 170px); object-fit: contain; margin: 0 auto; }
 .raffle-screen-side-image { grid-row: 1; }
 
 .raffle-winner-count { display: flex; align-items: center; gap: 12px; color: #d6d3db; font-size: 14px; }

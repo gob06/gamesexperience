@@ -41,6 +41,10 @@ Each account manages its own QR voting, Q&A, raffle, word scramble, and Selfie C
 
 When creating a raffle, word scramble, or Q&A, optionally set the guest name field label shown during registration. Leave it blank to keep the default; Q&A labels can also be changed in its edit dialog. The field still collects and validates a guest's name.
 
+Raffle and word scramble open displays show ticket values without the ticket-number label; guest registration and host pages retain the configured label.
+
+When creating a raffle or word scramble, choose text or an uploaded/image-bank image for the event name on the open display. The activity name remains required for host and guest pages, and the QR logo is separate. Existing activities continue to show their text name. Images must be JPEG, PNG, or WebP (up to 5 MB); restart the API after updating to add the new database columns.
+
 In Appearance, the raffle, word scramble, and Selfie Cam display settings offer optional box color and opacity controls. They affect the open display only; Selfie Cam applies them to both the photo wall and QR panel while keeping the QR code readable. Save and publish the theme to make changes visible to guests.
 
 The signed-out login page uses the superadmin's published appearance. To change it, sign in as the superadmin, update the appearance, and publish the theme. Before the first account is created, the login and setup page use the original shared theme.

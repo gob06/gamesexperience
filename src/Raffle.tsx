@@ -7,6 +7,7 @@ import { TermsNotice } from './terms'
 import { SavedLogoPicker, logoToFile, saveLogo, type SavedLogo } from './logoLibrary'
 import { DisplayWinners } from './DisplayWinners'
 import { DisplayImagePicker } from './DisplayImagePicker'
+import { DisplayEventTitle, DisplayEventTitleChoice } from './DisplayEventTitle'
 
 type Raffle = {
   id: string
@@ -14,6 +15,7 @@ type Raffle = {
   ticketLabel?: string | null
   nameLabel?: string | null
   logoUrl: string | null
+  displayTitleImageUrl?: string | null
   displayImage1Url?: string | null
   displayImage2Url?: string | null
   createdAt: string
@@ -204,17 +206,17 @@ export function RaffleDisplayPage({ raffleId }: { raffleId: string }) {
           <div className="raffle-screen-main" aria-live="polite">
             <header className="raffle-screen-event">
               {data.raffle.displayImage1Url && <img className="raffle-screen-side-image is-left" src={data.raffle.displayImage1Url} alt="" />}
-              <h1>{data.raffle.title}</h1>
+              <DisplayEventTitle title={data.raffle.title} imageUrl={data.raffle.displayTitleImageUrl} />
               {data.raffle.displayImage2Url && <img className="raffle-screen-side-image is-right" src={data.raffle.displayImage2Url} alt="" />}
             </header>
             <div className="raffle-screen-stage">
               {isDrawing ? (
                 <div className="raffle-screen-draw">
                   <strong key={rollingEntry?.id || 'empty'} className="raffle-screen-name">{rollingEntry?.participantName || 'Waiting for eligible tickets…'}</strong>
-                  {rollingEntry && <span className="raffle-screen-ticket">{(data.raffle.ticketLabel?.trim() || 'Ticket').toUpperCase()} {rollingEntry.ticketNumber}</span>}
+                  {rollingEntry && <span className="raffle-screen-ticket">{rollingEntry.ticketNumber}</span>}
                 </div>
               ) : hasWinners && (
-                <DisplayWinners winners={displayWinners} label="Latest draw winners" ticketLabel={data.raffle.ticketLabel} />
+                <DisplayWinners winners={displayWinners} label="Latest draw winners" />
               )}
             </div>
           </div>
@@ -342,6 +344,8 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
   const [tab, setTab] = useState<RaffleTab>('qr')
 
   const [title, setTitle] = useState('')
+  const [useTitleImage, setUseTitleImage] = useState(false)
+  const [titleImage, setTitleImage] = useState<File | null>(null)
   const [ticketLabel, setTicketLabel] = useState('')
   const [nameLabel, setNameLabel] = useState('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
@@ -446,6 +450,10 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
 
   async function createRaffle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (useTitleImage && !titleImage) {
+      setError('Choose an image for the open display event name.')
+      return
+    }
     setBusy(true)
     setError('')
     setNotice('')
@@ -454,6 +462,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     if (ticketLabel.trim()) data.append('ticketLabel', ticketLabel.trim())
     if (nameLabel.trim()) data.append('nameLabel', nameLabel.trim())
     if (logoFile) data.append('logo', logoFile)
+    if (useTitleImage && titleImage) data.append('displayTitleImage', titleImage)
     if (displayImage1) data.append('displayImage1', displayImage1)
     if (displayImage2) data.append('displayImage2', displayImage2)
     try {
@@ -461,6 +470,8 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
       setRaffles((current) => [created, ...current])
       setSelectedId(created.id)
       setTitle('')
+      setUseTitleImage(false)
+      setTitleImage(null)
       setTicketLabel('')
       setNameLabel('')
       setLogoFile(null)
@@ -666,12 +677,13 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
               <h2>Create a raffle</h2>
               <label htmlFor="raffle-title">Event or raffle name</label>
               <input id="raffle-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={3} maxLength={120} placeholder="e.g. Championship night" required />
+              <DisplayEventTitleChoice useImage={useTitleImage} onModeChange={setUseTitleImage} file={titleImage} onChange={setTitleImage} onError={setError} />
               <label htmlFor="raffle-name-label">Guest name field label</label>
               <input id="raffle-name-label" value={nameLabel} onChange={(event) => setNameLabel(event.target.value)} maxLength={40} placeholder="Ticket holder name" />
               <p className="raffle-help">Shown on guest registration. Leave blank for Ticket holder name.</p>
               <label htmlFor="raffle-ticket-label">Ticket number label</label>
               <input id="raffle-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
-              <p className="raffle-help">Shown on guest registration and the open display. Leave blank for Ticket number.</p>
+              <p className="raffle-help">Shown on guest registration and host pages. Leave blank for Ticket number.</p>
               <input ref={logoInputRef} className="raffle-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={selectLogo} aria-label="Upload QR logo" />
               <div className="raffle-logo-row">
                 <span className="raffle-logo-preview">{logoPreview ? <img src={logoPreview} alt="Logo preview" /> : <ImagePlus size={19} />}</span>
