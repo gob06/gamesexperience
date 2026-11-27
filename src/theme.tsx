@@ -56,6 +56,7 @@ export type DisplayOverride = {
   skin: 'inherit' | ThemeSkin
   colors: ThemeColors
   background: ThemeBackgroundSettings
+  box: { color: string; opacity: number } | null
 }
 
 export type ThemeConfig = {
@@ -94,6 +95,7 @@ export function createDefaultDisplayOverride(): DisplayOverride {
     skin: 'inherit',
     colors: { ...DEFAULT_COLORS },
     background: { ...DEFAULT_BACKGROUND },
+    box: null,
   }
 }
 
@@ -145,6 +147,7 @@ export function normalizeThemeConfig(config?: Partial<ThemeConfig> | null): Them
           skin: entry?.skin && ['inherit', 'broadcast', 'classic'].includes(entry.skin) ? entry.skin : 'inherit',
           colors: { ...defaults.colors, ...(entry?.colors || {}) },
           background: { ...defaults.background, ...(entry?.background || {}) },
+          box: entry?.box ? { ...entry.box } : null,
         },
       ]
     }),
@@ -159,6 +162,16 @@ export function normalizeThemeConfig(config?: Partial<ThemeConfig> | null): Them
     colors: { ...DEFAULT_THEME.colors, ...(source.colors || {}) },
     background: { ...DEFAULT_THEME.background, ...(source.background || {}) },
     displays,
+  }
+}
+
+export function verifyDisplayBoxesSaved(expected: ThemeConfig, actual: Partial<ThemeConfig> | null | undefined) {
+  for (const key of ['raffle', 'scramble', 'selfie'] as const) {
+    const box = expected.displays[key].box
+    const saved = actual?.displays?.[key]?.box
+    if (box && (!saved || saved.color.toLowerCase() !== box.color.toLowerCase() || saved.opacity !== box.opacity)) {
+      throw new Error('The server did not save the open display box settings. Restart or update the API, then save and publish the theme again.')
+    }
   }
 }
 
@@ -268,6 +281,7 @@ export function getDisplayPresentation(theme: ThemeConfig, assetUrls: Record<str
   const bg = customized ? override.background : theme.background
   const backgroundUrl = resolveDisplayBackgroundUrl(assetUrls, target)
   const displayBackgroundImage = backgroundValue(backgroundUrl, bg.opacity, bg.overlay)
+  const box = ['raffle-display', 'scramble-display', 'selfie-display'].includes(target) ? override?.box : null
 
   const style = {
     '--theme-primary': colors.primary,
@@ -283,6 +297,7 @@ export function getDisplayPresentation(theme: ThemeConfig, assetUrls: Record<str
     '--theme-background-repeat': bg.size === 'repeat' ? 'repeat' : 'no-repeat',
     '--theme-background-position': bg.position,
     '--theme-display-background-image': displayBackgroundImage,
+    ...(box ? { '--theme-display-box-background': `${box.color}${Math.round(box.opacity * 255).toString(16).padStart(2, '0')}` } : {}),
   } as CSSProperties
 
   const isRegistration = target === 'qa-register' || target === 'raffle-register' || target === 'scramble-register' || target === 'game-join'
@@ -292,6 +307,7 @@ export function getDisplayPresentation(theme: ThemeConfig, assetUrls: Record<str
     customized ? 'is-display-customized' : '',
     backgroundUrl ? 'has-display-bg' : '',
     isRegistration ? 'is-guest-registration' : '',
+    box ? 'has-custom-display-box' : '',
   ].filter(Boolean).join(' ')
 
   return {

@@ -105,7 +105,7 @@ app.get('/api/network-addresses', (_request, response) => {
   response.json({ addresses })
 })
 
-const selectPoll = database.prepare("SELECT id, question, join_title AS joinTitle, ticket_label AS ticketLabel, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, owner_user_id AS ownerUserId, CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/logo') END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/question-image') END AS questionImageUrl FROM polls WHERE id = ?")
+const selectPoll = database.prepare("SELECT id, question, join_title AS joinTitle, ticket_label AS ticketLabel, name_label AS nameLabel, created_at AS createdAt, is_qa AS isQa, voting_enabled AS votingEnabled, video_enabled AS videoEnabled, reveal_correct AS revealCorrect, correct_option_id AS correctOptionId, owner_user_id AS ownerUserId, CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/logo') END AS logoUrl, CASE WHEN question_image IS NULL THEN NULL ELSE CONCAT('/api/polls/', id, '/question-image') END AS questionImageUrl FROM polls WHERE id = ?")
 const selectQaWinner = database.prepare('SELECT v.voter_id AS voterId, v.first_name AS firstName, v.ticket_number AS ticketNumber, o.label AS answer FROM poll_voters v JOIN poll_options o ON o.id = v.option_id WHERE v.poll_id = ? AND v.is_correct = 1 ORDER BY v.created_at, v.seq LIMIT 1')
 const selectQaStats = database.prepare('SELECT (SELECT COUNT(*) FROM poll_voting_sessions WHERE poll_id = ? AND ticket_key IS NOT NULL) AS participants, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND option_id IS NOT NULL) AS submissions, (SELECT COUNT(*) FROM poll_voters WHERE poll_id = ? AND is_correct = 1) AS winners')
 const selectOptions = database.prepare("SELECT id, label, votes, hide_label AS hideLabel, CASE WHEN image IS NULL THEN NULL ELSE CONCAT('/api/poll-options/', id, '/image') END AS imageUrl FROM poll_options WHERE poll_id = ? ORDER BY `position`")
@@ -208,6 +208,7 @@ function createDefaultDisplayConfig() {
     skin: 'inherit',
     colors: { ...defaultThemeColors },
     background: { ...defaultThemeBackground },
+    box: null,
   }
 }
 
@@ -272,6 +273,10 @@ function normalizeDisplayOverride(raw) {
     customized: Boolean(raw.customized),
     skin,
     colors: { ...base.colors, ...(raw.colors && typeof raw.colors === 'object' && !Array.isArray(raw.colors) ? raw.colors : {}) },
+    box: raw.box && typeof raw.box === 'object' && !Array.isArray(raw.box)
+      && typeof raw.box.color === 'string' && /^#[0-9a-f]{6}$/i.test(raw.box.color)
+      && typeof raw.box.opacity === 'number' && Number.isFinite(raw.box.opacity) && raw.box.opacity >= 0 && raw.box.opacity <= 1
+      ? { color: raw.box.color.toLowerCase(), opacity: raw.box.opacity } : null,
     background: {
       ...base.background,
       ...rawBackground,
@@ -321,6 +326,14 @@ function validateAndNormalizeDisplays(displays) {
     if (!['inherit', ...themeSkins].includes(skin)) {
       return { ok: false, error: `Invalid display theme skin for ${key}.` }
     }
+    const box = entry.box
+    if (box !== undefined && box !== null && (
+      typeof box !== 'object' || Array.isArray(box)
+      || typeof box.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(box.color)
+      || typeof box.opacity !== 'number' || !Number.isFinite(box.opacity) || box.opacity < 0 || box.opacity > 1
+    )) {
+      return { ok: false, error: `Display box color or opacity for ${key} is invalid.` }
+    }
     const colors = entry.colors
     if (!colors || typeof colors !== 'object' || Array.isArray(colors) || colorKeys.some((colorKey) => typeof colors[colorKey] !== 'string' || !/^#[0-9a-f]{6}$/i.test(colors[colorKey]))) {
       return { ok: false, error: `Display colors for ${key} must be valid six-digit hex colors.` }
@@ -340,6 +353,7 @@ function validateAndNormalizeDisplays(displays) {
     normalized[key] = {
       customized: Boolean(entry.customized),
       skin,
+      box: box ? { color: box.color.toLowerCase(), opacity: box.opacity } : null,
       colors: Object.fromEntries(colorKeys.map((colorKey) => [colorKey, colors[colorKey].toLowerCase()])),
       background: {
         position: bg.position,
@@ -1802,19 +1816,23 @@ app.post('/api/polls', requireUser, imageUpload.fields([{ name: 'logo', maxCount
   if (ticketLabel.length > 40) {
     return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
   }
+  const nameLabel = !isQa || request.body.nameLabel === undefined ? '' : typeof request.body.nameLabel === 'string' ? request.body.nameLabel.trim() : null
+  if (nameLabel === null || nameLabel.length > 40) {
+    return response.status(400).json({ error: 'Guest name label must be 40 characters or fewer.' })
+  }
   const poll = { id: randomUUID(), question, createdAt: new Date().toISOString() }
   const optionsWithIds = options.map((option) => ({ ...option, id: randomUUID() }))
   const correctOptionId = optionsWithIds.find((option) => option.isCorrect)?.id || null
   await inTransaction(async () => {
-    await database.prepare('INSERT INTO polls (id, question, ticket_label, created_at, logo_mime_type, logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-              .run(poll.id, question, ticketLabel || null, poll.createdAt, logoFile?.mimetype || null, logoFile?.buffer || null, Number(isQa), correctOptionId, questionImageFile?.mimetype || null, questionImageFile?.buffer || null, Number(isQa && request.body.revealCorrect === 'true'), request.user.id)
+    await database.prepare('INSERT INTO polls (id, question, ticket_label, name_label, created_at, logo_mime_type, logo, is_qa, correct_option_id, question_image_mime_type, question_image, reveal_correct, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+              .run(poll.id, question, ticketLabel || null, nameLabel || null, poll.createdAt, logoFile?.mimetype || null, logoFile?.buffer || null, Number(isQa), correctOptionId, questionImageFile?.mimetype || null, questionImageFile?.buffer || null, Number(isQa && request.body.revealCorrect === 'true'), request.user.id)
     const insertOption = database.prepare('INSERT INTO poll_options (id, poll_id, label, `position`, votes, image_mime_type, image, hide_label) VALUES (?, ?, ?, ?, 0, ?, ?, ?)')
     for (const [index, option] of optionsWithIds.entries()) {
       const file = option.imageIndex === null ? null : optionFiles[option.imageIndex]
       await insertOption.run(option.id, poll.id, option.label, index, file?.mimetype || null, file?.buffer || null, Number(option.hideLabel === true))
     }
   })
-  await audit(request, 'poll.create', 'poll', poll.id, { isQa, ...(ticketLabel ? { ticketLabel } : {}) })
+  await audit(request, 'poll.create', 'poll', poll.id, { isQa, ...(ticketLabel ? { ticketLabel } : {}), ...(nameLabel ? { nameLabel } : {}) })
   response.status(201).json(await getPoll(poll.id, { admin: true }))
 })
 

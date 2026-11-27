@@ -8,7 +8,7 @@ const duplicateTicketMessage = 'This ticket number has already been registered. 
 const registrationLimit = rateLimit({ windowMs: 60_000, max: Number(process.env.RAFFLE_REGISTRATION_LIMIT_PER_MINUTE || 60) })
 
 const selectRaffle = database => database.prepare(`
-  SELECT id, title, ticket_label AS ticketLabel, draw_status AS drawStatus, draw_winner_count AS drawWinnerCount, reset_version AS resetVersion, created_at AS createdAt,
+  SELECT id, title, ticket_label AS ticketLabel, name_label AS nameLabel, draw_status AS drawStatus, draw_winner_count AS drawWinnerCount, reset_version AS resetVersion, created_at AS createdAt,
     CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/logo?version=2') END AS logoUrl,
     CASE WHEN display_image_1 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/1?version=1') END AS displayImage1Url,
     CASE WHEN display_image_2 IS NULL THEN NULL ELSE CONCAT('/api/raffles/', id, '/display-image/2?version=1') END AS displayImage2Url
@@ -38,6 +38,7 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     const raffles = await database.prepare(`
       SELECT raffle_sessions.id, raffle_sessions.title,
         raffle_sessions.ticket_label AS ticketLabel,
+        raffle_sessions.name_label AS nameLabel,
         raffle_sessions.draw_status AS drawStatus,
         raffle_sessions.draw_winner_count AS drawWinnerCount,
         raffle_sessions.reset_version AS resetVersion,
@@ -59,6 +60,8 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
     if (title.length < 3 || title.length > 120) return response.status(400).json({ error: 'Raffle title must be between 3 and 120 characters.' })
     const ticketLabel = typeof request.body.ticketLabel === 'string' ? request.body.ticketLabel.trim() : ''
     if (ticketLabel.length > 40) return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
+    const nameLabel = request.body.nameLabel === undefined ? '' : typeof request.body.nameLabel === 'string' ? request.body.nameLabel.trim() : null
+    if (nameLabel === null || nameLabel.length > 40) return response.status(400).json({ error: 'Guest name label must be 40 characters or fewer.' })
     const logo = request.files?.logo?.[0]
     const displayImage1 = request.files?.displayImage1?.[0]
     const displayImage2 = request.files?.displayImage2?.[0]
@@ -70,16 +73,16 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
 
     const raffle = { id: randomUUID(), title, createdAt: new Date().toISOString() }
     await database.prepare(`
-      INSERT INTO raffle_sessions (id, title, ticket_label, logo_mime_type, logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, draw_status, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+      INSERT INTO raffle_sessions (id, title, ticket_label, name_label, logo_mime_type, logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, draw_status, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
     `).run(
-      raffle.id, title, ticketLabel || null,
+      raffle.id, title, ticketLabel || null, nameLabel || null,
       logo?.mimetype || null, logo?.buffer || null,
       displayImage1?.mimetype || null, displayImage1?.buffer || null,
       displayImage2?.mimetype || null, displayImage2?.buffer || null,
       request.user.id, raffle.createdAt, raffle.createdAt,
     )
-    await audit(request, 'raffle.create', 'raffle', raffle.id, { title, ...(ticketLabel ? { ticketLabel } : {}) })
+    await audit(request, 'raffle.create', 'raffle', raffle.id, { title, ...(ticketLabel ? { ticketLabel } : {}), ...(nameLabel ? { nameLabel } : {}) })
     response.status(201).json(await getRaffle.get(raffle.id))
   })
 

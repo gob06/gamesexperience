@@ -39,6 +39,10 @@ On first visit, create the initial admin account. Usernames must be 3–40 lette
 
 Each account manages its own QR voting, Q&A, raffle, word scramble, and Selfie Cam sessions, image bank, and appearance. The first admin is the superadmin and can view and manage all activity sessions; other admins retain system-admin privileges but cannot manage another account's sessions. Image banks and theme drafts remain account-specific even for the superadmin. Public activity and display links continue to work and use the activity owner's published theme.
 
+When creating a raffle, word scramble, or Q&A, optionally set the guest name field label shown during registration. Leave it blank to keep the default; Q&A labels can also be changed in its edit dialog. The field still collects and validates a guest's name.
+
+In Appearance, the raffle, word scramble, and Selfie Cam display settings offer optional box color and opacity controls. They affect the open display only; Selfie Cam applies them to both the photo wall and QR panel while keeping the QR code readable. Save and publish the theme to make changes visible to guests.
+
 The signed-out login page uses the superadmin's published appearance. To change it, sign in as the superadmin, update the appearance, and publish the theme. Before the first account is created, the login and setup page use the original shared theme.
 
 On the first server start after upgrading, existing polls and Q&A are assigned to the earliest-created admin because their creators were not previously recorded. Existing raffle, word scramble, and selfie ownership is preserved. The existing shared image bank is assigned to the account named `admin`, and existing accounts start with the previous published and draft theme. Back up the database and theme-asset directory before upgrading. If the shared image bank contains images but `admin` does not exist, startup stops with an explicit migration error; create or identify that account before upgrading. Restart the API to apply the database migration.

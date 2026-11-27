@@ -2417,6 +2417,39 @@ input::placeholder, textarea::placeholder { color: #827b85; }
   background: #ffffff;
   color: #131317;
 }
+.theme-preview-selfie-qr-panel {
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--theme-accent), transparent 35%);
+  border-radius: var(--theme-radius);
+  background: rgba(12, 12, 18, .68);
+}
+.theme-preview-selfie-qr-panel .theme-preview-qr-box { width: 100%; min-height: 80px; }
+.theme-display-box-settings { margin: 18px 0; }
+.theme-display-box-toggle { display: flex; align-items: center; gap: 8px; }
+.theme-display-box-toggle input { width: auto; }
+.theme-root :is(.raffle-screen-shell, .scramble-screen-shell).has-custom-display-box :is(.raffle-screen-main, .raffle-screen-scan, .scramble-word-letter, .scramble-screen-badge, .scramble-screen-corner-qr span) {
+  background: var(--theme-display-box-background);
+}
+.theme-root :is(.raffle-screen-shell, .scramble-screen-shell).has-custom-display-box .raffle-screen-scan {
+  color: var(--theme-text);
+}
+.theme-root .raffle-screen-shell.has-custom-display-box :is(.raffle-screen-draw, .raffle-screen-winner-list li) {
+  background: transparent;
+}
+.theme-root .scramble-screen-shell.has-custom-display-box :is(.raffle-screen-winner-list li, .scramble-screen-title, .scramble-screen-subtitle) {
+  background: var(--theme-display-box-background);
+}
+.theme-root .selfie-display.has-custom-display-box :is(.selfie-display-wall, .selfie-display-qr) {
+  background: var(--theme-display-box-background);
+}
+.theme-root .theme-preview-canvas.has-custom-display-box :is(.theme-preview-winner-box, .theme-preview-tiles span, .theme-preview-photo-card, .theme-preview-selfie-qr-panel) {
+  background: var(--theme-display-box-background);
+}
+.theme-root .theme-preview-canvas.has-custom-display-box:is(.display-scope-raffle, .display-scope-scramble) h3 {
+  background: var(--theme-display-box-background);
+}
 .theme-preview-canvas.skin-classic h3 {
   font-family: 'Fraunces', Georgia, serif !important;
   font-style: normal;
@@ -2433,5 +2466,3 @@ input::placeholder, textarea::placeholder { color: #827b85; }
     grid-template-columns: minmax(0, 1fr);
   }
 }
-
-

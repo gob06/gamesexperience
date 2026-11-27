@@ -375,6 +375,8 @@ export function registerQaRoutes({
     if (joinTitle === null || (joinTitle !== undefined && joinTitle.length > 80)) return response.status(400).json({ error: 'The join title must be 80 characters or fewer.' })
     const ticketLabel = body.ticketLabel === undefined ? undefined : typeof body.ticketLabel === 'string' ? body.ticketLabel.trim() : null
     if (ticketLabel === null || (ticketLabel !== undefined && ticketLabel.length > 40)) return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
+    const nameLabel = body.nameLabel === undefined ? undefined : typeof body.nameLabel === 'string' ? body.nameLabel.trim() : null
+    if (nameLabel === null || (nameLabel !== undefined && nameLabel.length > 40)) return response.status(400).json({ error: 'Guest name label must be 40 characters or fewer.' })
     const optionRows = await database.prepare('SELECT id, CASE WHEN image IS NULL THEN 0 ELSE 1 END AS hasImage FROM poll_options WHERE poll_id = ?').all(poll.id)
     const optionsById = new Map(optionRows.map((option) => [option.id, option]))
     const optionIds = new Set(optionsById.keys())
@@ -391,6 +393,7 @@ export function registerQaRoutes({
       if (question !== undefined) await database.prepare('UPDATE polls SET question = ? WHERE id = ?').run(question, poll.id)
       if (joinTitle !== undefined) await database.prepare('UPDATE polls SET join_title = ? WHERE id = ?').run(joinTitle || null, poll.id)
       if (ticketLabel !== undefined) await database.prepare('UPDATE polls SET ticket_label = ? WHERE id = ?').run(ticketLabel || null, poll.id)
+      if (nameLabel !== undefined) await database.prepare('UPDATE polls SET name_label = ? WHERE id = ?').run(nameLabel || null, poll.id)
       if (body.revealCorrect !== undefined) await database.prepare('UPDATE polls SET reveal_correct = ? WHERE id = ?').run(Number(body.revealCorrect), poll.id)
       if (body.correctOptionId !== undefined) await database.prepare('UPDATE polls SET correct_option_id = ? WHERE id = ?').run(body.correctOptionId, poll.id)
       for (const option of labels) await database.prepare('UPDATE poll_options SET label = ? WHERE id = ? AND poll_id = ?').run(option.label, option.id, poll.id)

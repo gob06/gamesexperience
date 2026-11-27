@@ -53,7 +53,7 @@ function isValidScramble(scrambled, answer) {
 }
 
 const selectGameSql = `
-  SELECT id, title, ticket_label AS ticketLabel, status, answer, scrambled,
+  SELECT id, title, ticket_label AS ticketLabel, name_label AS nameLabel, status, answer, scrambled,
     answer_revealed_at AS answerRevealedAt,
     created_at AS createdAt, updated_at AS updatedAt,
     CASE WHEN logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', id, '/logo?version=1') END AS logoUrl,
@@ -69,6 +69,7 @@ function publicGame(game) {
     id: game.id,
     title: game.title,
     ticketLabel: game.ticketLabel ?? null,
+    nameLabel: game.nameLabel ?? null,
     status: game.status,
     logoUrl: game.logoUrl,
     displayLogoUrl: game.displayLogoUrl,
@@ -87,6 +88,7 @@ function hostGame(game) {
     id: game.id,
     title: game.title,
     ticketLabel: game.ticketLabel ?? null,
+    nameLabel: game.nameLabel ?? null,
     status: game.status,
     logoUrl: game.logoUrl,
     displayLogoUrl: game.displayLogoUrl,
@@ -150,7 +152,7 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
 
   app.get('/api/scrambles', requireUser, async (request, response) => {
     const games = await database.prepare(`
-      SELECT scramble_games.id, scramble_games.title, scramble_games.ticket_label AS ticketLabel, scramble_games.status,
+      SELECT scramble_games.id, scramble_games.title, scramble_games.ticket_label AS ticketLabel, scramble_games.name_label AS nameLabel, scramble_games.status,
         scramble_games.created_at AS createdAt,
         CASE WHEN scramble_games.logo IS NULL THEN NULL ELSE CONCAT('/api/scrambles/', scramble_games.id, '/logo?version=1') END AS logoUrl,
         (SELECT COUNT(*) FROM scramble_entries WHERE game_id = scramble_games.id) AS entryCount,
@@ -165,10 +167,12 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
   app.post('/api/scrambles', requireUser, imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'displayLogo', maxCount: 1 }, { name: 'displayImage1', maxCount: 1 }, { name: 'displayImage2', maxCount: 1 }]), async (request, response) => {
     const title = typeof request.body.title === 'string' ? request.body.title.trim() : ''
     const ticketLabel = typeof request.body.ticketLabel === 'string' ? request.body.ticketLabel.trim() : ''
+    const nameLabel = request.body.nameLabel === undefined ? '' : typeof request.body.nameLabel === 'string' ? request.body.nameLabel.trim() : null
     const answerInput = typeof request.body.answer === 'string' ? request.body.answer.normalize('NFKC').trim().replace(/\s+/g, ' ') : ''
     const scrambledInput = typeof request.body.scrambled === 'string' ? request.body.scrambled.normalize('NFKC').trim().replace(/\s+/g, ' ') : ''
     if (title.length < 3 || title.length > 120) return response.status(400).json({ error: 'Game title must be between 3 and 120 characters.' })
     if (ticketLabel.length > 40) return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
+    if (nameLabel === null || nameLabel.length > 40) return response.status(400).json({ error: 'Guest name label must be 40 characters or fewer.' })
     if (answerInput.length < 2 || answerInput.length > 120 || !answerPattern.test(answerInput)) return response.status(400).json({ error: 'Enter an answer word or phrase between 2 and 120 letters, numbers, and basic punctuation.' })
     const scrambled = scrambledInput ? scrambledInput.toUpperCase() : scrambleAnswer(answerInput)
     if (!isValidScramble(scrambled, answerInput)) return response.status(400).json({ error: 'The scrambled version must use exactly the same letters as the answer.' })
@@ -185,10 +189,10 @@ export function registerScrambleRoutes({ app, database, requireUser, imageUpload
     const now = new Date().toISOString()
     const id = randomUUID()
     await database.prepare(`
-      INSERT INTO scramble_games (id, title, ticket_label, answer, scrambled, status, answer_revealed_at, logo_mime_type, logo, display_logo_mime_type, display_logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, title, ticketLabel || null, answerInput, scrambled, logo?.mimetype || null, logo?.buffer || null, displayLogo?.mimetype || null, displayLogo?.buffer || null, displayImage1?.mimetype || null, displayImage1?.buffer || null, displayImage2?.mimetype || null, displayImage2?.buffer || null, request.user.id, now, now)
-    await audit(request, 'scramble.create', 'scramble', id, { title, ...(ticketLabel ? { ticketLabel } : {}) })
+      INSERT INTO scramble_games (id, title, ticket_label, name_label, answer, scrambled, status, answer_revealed_at, logo_mime_type, logo, display_logo_mime_type, display_logo, display_image_1_mime_type, display_image_1, display_image_2_mime_type, display_image_2, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, title, ticketLabel || null, nameLabel || null, answerInput, scrambled, logo?.mimetype || null, logo?.buffer || null, displayLogo?.mimetype || null, displayLogo?.buffer || null, displayImage1?.mimetype || null, displayImage1?.buffer || null, displayImage2?.mimetype || null, displayImage2?.buffer || null, request.user.id, now, now)
+    await audit(request, 'scramble.create', 'scramble', id, { title, ...(ticketLabel ? { ticketLabel } : {}), ...(nameLabel ? { nameLabel } : {}) })
     response.status(201).json(hostGame(await getGame(id)))
   })
 

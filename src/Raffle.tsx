@@ -12,6 +12,7 @@ type Raffle = {
   id: string
   title: string
   ticketLabel?: string | null
+  nameLabel?: string | null
   logoUrl: string | null
   displayImage1Url?: string | null
   displayImage2Url?: string | null
@@ -307,8 +308,8 @@ export function RaffleJoinPage({ raffleId }: { raffleId: string }) {
               return (
               <form className="raffle-entry-form" onSubmit={(event) => void register(event)}>
                 {resetNotice && <p className="raffle-notice" role="status">{resetNotice}</p>}
-                <label htmlFor="raffle-participant-name">Ticket holder name</label>
-                <input id="raffle-participant-name" autoComplete="name" maxLength={80} value={participantName} onChange={(event) => setParticipantName(event.target.value)} placeholder="Enter your name" required />
+                <label htmlFor="raffle-participant-name">{raffle.nameLabel?.trim() || 'Ticket holder name'}</label>
+                <input id="raffle-participant-name" autoComplete="name" maxLength={80} value={participantName} onChange={(event) => setParticipantName(event.target.value)} placeholder={raffle.nameLabel?.trim() ? `Enter your ${raffle.nameLabel.trim().toLowerCase()}` : 'Enter your name'} required />
                 <label htmlFor="raffle-ticket-number">{ticketFieldLabel}</label>
                 <input id="raffle-ticket-number" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder={`Enter your ${ticketFieldLabel.toLowerCase()}`} required />
                 {error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
@@ -342,6 +343,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
 
   const [title, setTitle] = useState('')
   const [ticketLabel, setTicketLabel] = useState('')
+  const [nameLabel, setNameLabel] = useState('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState('')
   const [displayImage1, setDisplayImage1] = useState<File | null>(null)
@@ -450,6 +452,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     const data = new FormData()
     data.append('title', title.trim())
     if (ticketLabel.trim()) data.append('ticketLabel', ticketLabel.trim())
+    if (nameLabel.trim()) data.append('nameLabel', nameLabel.trim())
     if (logoFile) data.append('logo', logoFile)
     if (displayImage1) data.append('displayImage1', displayImage1)
     if (displayImage2) data.append('displayImage2', displayImage2)
@@ -459,6 +462,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
       setSelectedId(created.id)
       setTitle('')
       setTicketLabel('')
+      setNameLabel('')
       setLogoFile(null)
       setLogoPreview('')
       setDisplayImage1(null)
@@ -662,6 +666,9 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
               <h2>Create a raffle</h2>
               <label htmlFor="raffle-title">Event or raffle name</label>
               <input id="raffle-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={3} maxLength={120} placeholder="e.g. Championship night" required />
+              <label htmlFor="raffle-name-label">Guest name field label</label>
+              <input id="raffle-name-label" value={nameLabel} onChange={(event) => setNameLabel(event.target.value)} maxLength={40} placeholder="Ticket holder name" />
+              <p className="raffle-help">Shown on guest registration. Leave blank for Ticket holder name.</p>
               <label htmlFor="raffle-ticket-label">Ticket number label</label>
               <input id="raffle-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
               <p className="raffle-help">Shown on guest registration and the open display. Leave blank for Ticket number.</p>

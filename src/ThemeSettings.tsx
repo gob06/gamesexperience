@@ -10,6 +10,7 @@ import {
   normalizeThemeConfig,
   THEME_SKINS,
   useTheme,
+  verifyDisplayBoxesSaved,
   type DisplayKey,
   type DisplayOverride,
   type DisplayTarget,
@@ -252,7 +253,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
     setNotice('')
   }
 
-  function updateDisplayOverride(key: DisplayKey, update: (current: DisplayOverride, effective: { colors: ThemeConfig['colors']; background: ThemeConfig['background'] }) => DisplayOverride) {
+  function updateDisplayOverride(key: DisplayKey, update: (current: DisplayOverride, effective: { colors: ThemeConfig['colors']; background: ThemeConfig['background'] }) => Omit<DisplayOverride, 'box'> & Partial<Pick<DisplayOverride, 'box'>>) {
     updateDraft((current) => {
       const existing = current.displays[key] || createDefaultDisplayOverride()
       const effective = {
@@ -263,7 +264,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
         ...current,
         displays: {
           ...current.displays,
-          [key]: update(existing, effective),
+          [key]: { ...existing, ...update(existing, effective) },
         },
       }
     })
@@ -362,6 +363,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Could not save the draft.')
+      verifyDisplayBoxesSaved(draft, result.draft)
       setDraft(normalizeThemeConfig(result.draft))
       setNotice(scope === 'game' ? 'Game theme draft saved. It is not visible until published.' : 'Draft saved. It is not visible to participants until published.')
       await loadSettings()
@@ -384,9 +386,11 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
       })
       const saveResult = await saveResponse.json()
       if (!saveResponse.ok) throw new Error(saveResult.error || 'Could not save the draft.')
+      verifyDisplayBoxesSaved(draft, saveResult.draft)
       const response = await fetch(`${apiBase}/publish`, { method: 'POST' })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Could not publish the theme.')
+      verifyDisplayBoxesSaved(draft, result.published)
       setPublished(normalizeThemeConfig(result.published))
       if (scope === 'site') await refreshTheme()
       await loadSettings()
@@ -686,7 +690,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                         }}
                       >
                         <span>{meta.label}</span>
-                        {(isCustom || hasBg) && <i className="theme-display-dot" aria-hidden="true" />}
+                        {(isCustom || hasBg || draft.displays[key].box) && <i className="theme-display-dot" aria-hidden="true" />}
                       </button>
                     )
                   })}
@@ -727,6 +731,44 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                   <div className="theme-image-grid">
                     {activeDisplayMeta.backgroundFields.map(({ key, label }) => renderImageField(key, label))}
                   </div>
+
+                  {(['raffle', 'scramble', 'selfie'] as DisplayKey[]).includes(activeDisplay) && (
+                    <div className="theme-display-box-settings">
+                      <label className="theme-display-box-toggle">
+                        <input
+                          type="checkbox"
+                          checked={activeOverride.box !== null}
+                          onChange={(event) => {
+                            const enabled = event.currentTarget.checked
+                            updateDisplayOverride(activeDisplay, (existing) => ({
+                              ...existing,
+                              box: enabled ? { color: '#050b35', opacity: 0.8 } : null,
+                            }))
+                          }}
+                        />
+                        Customize open display boxes
+                      </label>
+                      <p className="theme-upload-help">{activeDisplay === 'selfie' ? 'Applies to the photo wall and QR panel, not the QR code.' : 'Applies to display boxes and text backgrounds, not the QR code.'}</p>
+                      {activeOverride.box && (
+                        <div className="theme-settings-grid">
+                          <label>
+                            Box color
+                            <input type="color" value={activeOverride.box.color} onChange={(event) => {
+                              const color = event.currentTarget.value
+                              updateDisplayOverride(activeDisplay, (existing) => ({ ...existing, box: { color, opacity: existing.box?.opacity ?? 0.8 } }))
+                            }} />
+                          </label>
+                          <label>
+                            Box opacity: {Math.round(activeOverride.box.opacity * 100)}%
+                            <input type="range" min="0" max="1" step="0.01" value={activeOverride.box.opacity} onChange={(event) => {
+                              const opacity = Number(event.currentTarget.value)
+                              updateDisplayOverride(activeDisplay, (existing) => ({ ...existing, box: { color: existing.box?.color ?? '#050b35', opacity } }))
+                            }} />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="theme-display-override-grid">
                     <label>
@@ -1039,7 +1081,7 @@ export default function ThemeSettings({ onBack, scope = 'site' }: { onBack: () =
                     <h3>Approved Guest Photos</h3>
                     <div className="theme-preview-selfie-grid">
                       <div className="theme-preview-photo-card">Photo Wall</div>
-                      <div className="theme-preview-qr-box">QR</div>
+                      <div className="theme-preview-selfie-qr-panel"><div className="theme-preview-qr-box">QR</div></div>
                     </div>
                   </>
                 ) : (

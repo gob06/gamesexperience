@@ -74,11 +74,22 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
   qaForm.append('question', 'A quiz question?')
   qaForm.append('isQa', 'true')
   qaForm.append('ticketLabel', 'Badge ID')
+  qaForm.append('nameLabel', ' Participant name ')
   qaForm.append('options', JSON.stringify([{ label: 'Yes', imageIndex: null, isCorrect: true }, { label: 'No', imageIndex: null }]))
   const qa = await (await request('/api/polls', hostCookie, { method: 'POST', body: qaForm })).json()
   const selfie = await (await request('/api/selfie/sessions', hostCookie, { method: 'POST', headers: json(), body: '{}' })).json()
   assert.ok(raffle.id && scramble.id && poll.id && qa.id && selfie.id)
   assert.equal(qa.ticketLabel, 'Badge ID')
+  assert.equal(qa.nameLabel, 'Participant name')
+  assert.equal(raffle.nameLabel, null)
+  assert.equal(scramble.nameLabel, null)
+  assert.equal(poll.nameLabel, null)
+  const invalidQa = new FormData()
+  invalidQa.append('question', 'Invalid question?')
+  invalidQa.append('isQa', 'true')
+  invalidQa.append('nameLabel', 'x'.repeat(41))
+  invalidQa.append('options', JSON.stringify([{ label: 'Yes', imageIndex: null, isCorrect: true }, { label: 'No', imageIndex: null }]))
+  assert.equal((await request('/api/polls', hostCookie, { method: 'POST', body: invalidQa })).status, 400)
   for (const [url, id] of [['/api/raffles', raffle.id], ['/api/scrambles', scramble.id], ['/api/polls', poll.id]]) {
     assert.equal((await (await request(url, adminCookie)).json()).some((item) => item.id === id), false)
     assert.equal((await (await request(url, superCookie)).json()).some((item) => item.id === id), true)
@@ -109,6 +120,14 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
   assert.equal((await request(`/api/scrambles/${scramble.id}`, '')).status, 200)
   const publicQa = await (await request(`/api/polls/${qa.id}`, '')).json()
   assert.equal(publicQa.ticketLabel, 'Badge ID')
+  assert.equal(publicQa.nameLabel, 'Participant name')
+  assert.equal((await request(`/api/polls/${qa.id}`, adminCookie, { method: 'PATCH', headers: json(), body: JSON.stringify({ nameLabel: 'Other name' }) })).status, 404)
+  assert.equal((await request(`/api/polls/${qa.id}`, hostCookie, { method: 'PATCH', headers: json(), body: JSON.stringify({ nameLabel: 'x'.repeat(41) }) })).status, 400)
+  assert.equal((await request(`/api/polls/${qa.id}`, hostCookie, { method: 'PATCH', headers: json(), body: JSON.stringify({ nameLabel: null }) })).status, 400)
+  assert.equal((await request(`/api/polls/${qa.id}`, hostCookie, { method: 'PATCH', headers: json(), body: JSON.stringify({ nameLabel: ' Attendee name ' }) })).status, 200)
+  assert.equal((await (await request(`/api/polls/${qa.id}`, '')).json()).nameLabel, 'Attendee name')
+  assert.equal((await request(`/api/polls/${qa.id}`, hostCookie, { method: 'PATCH', headers: json(), body: JSON.stringify({ nameLabel: ' ' }) })).status, 200)
+  assert.equal((await (await request(`/api/polls/${qa.id}`, '')).json()).nameLabel, null)
   assert.equal((await (await request(`/api/polls/${qa.id}/monitor`, hostCookie)).json()).poll.ticketLabel, 'Badge ID')
   assert.equal('correctOptionId' in await (await request(`/api/polls/${qa.id}`, adminCookie)).json(), false)
   assert.equal('correctOptionId' in await (await request(`/api/polls/${qa.id}`, hostCookie)).json(), true)
@@ -173,6 +192,9 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
     selfie: { customized: true, skin: 'broadcast', colors: { ...theme.draft.colors, text: '#ffffff' }, background: { ...theme.draft.background, borderRadius: 14 } },
     game: { customized: true, skin: 'classic', colors: { ...theme.draft.colors, primary: '#00ffaa' }, background: { ...theme.draft.background, borderRadius: 12 } },
   }
+  theme.draft.displays.raffle.box = { color: '#AABBCC', opacity: 0 }
+  theme.draft.displays.scramble.box = { color: '#102030', opacity: 0.53 }
+  theme.draft.displays.selfie.box = { color: '#506070', opacity: 1 }
 
   // Invalid per-display override payload is rejected with 400.
   assert.equal((await request('/api/admin/theme/draft', hostCookie, {
@@ -180,6 +202,16 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
     headers: json(),
     body: JSON.stringify({ ...theme.draft, displays: { ...theme.draft.displays, qa: { ...theme.draft.displays.qa, colors: { ...theme.draft.displays.qa.colors, primary: 'not-a-color' } } } }),
   })).status, 400)
+  for (const box of [
+    { color: 'red', opacity: 0.5 }, { color: '#123456', opacity: -0.01 },
+    { color: '#123456', opacity: 1.01 }, { color: '#123456', opacity: '0.5' }, [],
+  ]) {
+    assert.equal((await request('/api/admin/theme/draft', hostCookie, {
+      method: 'PUT',
+      headers: json(),
+      body: JSON.stringify({ ...theme.draft, displays: { ...theme.draft.displays, raffle: { ...theme.draft.displays.raffle, box } } }),
+    })).status, 400)
+  }
 
   function makeFont(kind) {
     if (kind === 'woff2') { const b = Buffer.alloc(48); b.write('wOF2', 0, 'ascii'); return b }
@@ -229,6 +261,7 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
   assert.equal((await request(`/api/theme/assets/${uploadedFonts.woff2.id}`, '')).status, 404)
   assert.equal((await (await request('/api/theme', hostCookie)).json()).config.fonts.bodyFont, null)
   assert.equal((await (await request('/api/theme', hostCookie)).json()).config.displays.qa.customized, false)
+  assert.equal((await (await request('/api/theme', hostCookie)).json()).config.displays.raffle.box, null)
 
   assert.equal((await request('/api/admin/theme/publish', hostCookie, { method: 'POST' })).status, 200)
   const hostPublishedTheme = await (await request('/api/theme', hostCookie)).json()
@@ -239,6 +272,10 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
   assert.equal(hostPublishedTheme.config.displays.poll.colors.primary, '#123456')
   assert.equal(hostPublishedTheme.config.displays.qa.colors.accent, '#654321')
   assert.equal(hostPublishedTheme.config.displays.game.colors.primary, '#00ffaa')
+  assert.deepEqual(hostPublishedTheme.config.displays.raffle.box, { color: '#aabbcc', opacity: 0 })
+  assert.deepEqual(hostPublishedTheme.config.displays.scramble.box, { color: '#102030', opacity: 0.53 })
+  assert.deepEqual(hostPublishedTheme.config.displays.selfie.box, { color: '#506070', opacity: 1 })
+  assert.equal(hostPublishedTheme.config.displays.poll.box, null)
   assert.equal(hostPublishedTheme.fontAssets.bodyFont.url, `/api/theme/assets/${uploadedFonts.woff2.id}`)
   assert.equal(hostPublishedTheme.fontAssets.bodyFont.format, 'woff2')
   assert.equal(hostPublishedTheme.fontAssets.headingFont.format, 'opentype')
@@ -252,6 +289,7 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
   assert.notEqual((await (await request('/api/theme', superCookie)).json()).config.eventTitle, 'Host appearance')
   assert.equal((await (await request('/api/theme', superCookie)).json()).config.fonts.bodyFont, null)
   assert.equal((await (await request('/api/theme', adminCookie)).json()).config.fonts.bodyFont, null)
+  assert.equal((await (await request('/api/theme', adminCookie)).json()).config.displays.raffle.box, null)
   const superImageForm = new FormData()
   superImageForm.append('image', new Blob([image], { type: 'image/png' }), 'login.png')
   const superUpload = await request('/api/admin/theme/assets', superCookie, { method: 'POST', body: superImageForm })
@@ -287,11 +325,16 @@ test('accounts isolate activities, banks and themes while superadmin manages ses
     assert.equal(resolvedTheme.assetUrls.selfieDisplayBackground, `/api/theme/assets/${selfieDisplayBgImage.id}`)
     assert.equal(resolvedTheme.assetUrls.gameDisplayBackground, `/api/theme/assets/${gameBgImage.id}`)
     assert.equal(resolvedTheme.config.displays.selfie.customized, true)
+    assert.deepEqual(resolvedTheme.config.displays.raffle.box, { color: '#aabbcc', opacity: 0 })
+    assert.deepEqual(resolvedTheme.config.displays.scramble.box, { color: '#102030', opacity: 0.53 })
+    assert.deepEqual(resolvedTheme.config.displays.selfie.box, { color: '#506070', opacity: 1 })
     assert.equal(resolvedTheme.fontAssets.bodyFont.url, `/api/theme/assets/${uploadedFonts.woff2.id}`)
     assert.equal(resolvedTheme.fontAssets.headingFont.url, `/api/theme/assets/${uploadedFonts.otf.id}`)
   }
   assert.equal((await request(`/api/theme?kind=selfie-display&id=${selfie.id}`, '')).status, 404)
-  assert.equal((await (await request(`/api/theme?kind=selfie-display&id=${selfie.id}`, '', { headers: { 'X-Selfie-Display-Token': selfie.displayToken } })).json()).config.eventTitle, 'Host appearance')
+  const selfieDisplayTheme = await (await request(`/api/theme?kind=selfie-display&id=${selfie.id}`, '', { headers: { 'X-Selfie-Display-Token': selfie.displayToken } })).json()
+  assert.equal(selfieDisplayTheme.config.eventTitle, 'Host appearance')
+  assert.deepEqual(selfieDisplayTheme.config.displays.selfie.box, { color: '#506070', opacity: 1 })
 
   // Game room theme resolution via ?kind=game&id=<roomId> isolates to the room owner's account.
   const adminGame = await (await request('/api/games', adminCookie, { method: 'POST', headers: json(), body: JSON.stringify({ roomName: 'Admin Arena', playerName: 'Admin' }) })).json()

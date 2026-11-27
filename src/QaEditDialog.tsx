@@ -6,6 +6,7 @@ type EditablePoll = {
   question: string
   joinTitle?: string | null
   ticketLabel?: string | null
+  nameLabel?: string | null
   questionImageUrl?: string | null
   options: Array<{ id: string; label: string; imageUrl?: string | null }>
   revealCorrect?: boolean
@@ -17,6 +18,7 @@ export default function QaEditDialog<T extends EditablePoll>({ poll, onClose, on
   const [question, setQuestion] = useState(poll.question)
   const [joinTitle, setJoinTitle] = useState(poll.joinTitle ?? '')
   const [ticketLabel, setTicketLabel] = useState(poll.ticketLabel ?? '')
+  const [nameLabel, setNameLabel] = useState(poll.nameLabel ?? '')
   const [labels, setLabels] = useState(poll.options.map((option) => option.label))
   const [correctOptionId, setCorrectOptionId] = useState(poll.correctOptionId ?? '')
   const [revealCorrect, setRevealCorrect] = useState(Boolean(poll.revealCorrect))
@@ -36,6 +38,7 @@ export default function QaEditDialog<T extends EditablePoll>({ poll, onClose, on
           question: question.trim(),
           joinTitle: joinTitle.trim(),
           ticketLabel: ticketLabel.trim(),
+          nameLabel: nameLabel.trim(),
           options: poll.options.map((option, index) => ({ id: option.id, label: labels[index] })),
           correctOptionId,
           revealCorrect,
@@ -60,6 +63,8 @@ export default function QaEditDialog<T extends EditablePoll>({ poll, onClose, on
         <textarea id="qa-edit-question" value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={160} rows={2} required={!poll.questionImageUrl} />
         <label className="field-label" htmlFor="qa-edit-join-title">Join title (live results page)</label>
         <input id="qa-edit-join-title" value={joinTitle} onChange={(event) => setJoinTitle(event.target.value)} maxLength={80} placeholder="JOIN THE Q&A" />
+        <label className="field-label" htmlFor="qa-edit-name-label">Guest name field label</label>
+        <input id="qa-edit-name-label" value={nameLabel} onChange={(event) => setNameLabel(event.target.value)} maxLength={40} placeholder="Full name" />
         <label className="field-label" htmlFor="qa-edit-ticket-label">Ticket number label</label>
         <input id="qa-edit-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
         <span className="field-label">Answers{locked ? ' · the correct answer is locked because participants have already answered' : ' · select the correct answer'}</span>

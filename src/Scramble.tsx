@@ -28,6 +28,7 @@ type PublicScramble = {
   id: string
   title: string
   ticketLabel?: string | null
+  nameLabel?: string | null
   status: ScrambleStatus
   logoUrl: string | null
   displayLogoUrl: string | null
@@ -328,9 +329,9 @@ export function ScrambleJoinPage({ gameId }: { gameId: string }) {
                 const ticketFieldLabel = game.ticketLabel?.trim() || 'Ticket number'
                 return (
                 <form className="raffle-entry-form" onSubmit={(event) => void register(event)}>
-                  <p className="scramble-instructions">Unscramble the word to enter the winner pool. Register once with your name and {ticketFieldLabel.toLowerCase()}.</p>
-                  <label htmlFor="scramble-participant-name">Your name</label>
-                  <input id="scramble-participant-name" autoComplete="name" maxLength={80} value={participantName} onChange={(event) => setParticipantName(event.target.value)} placeholder="Enter your name" required />
+                  <p className="scramble-instructions">Unscramble the word to enter the winner pool. Register once with your {game.nameLabel?.trim().toLowerCase() || 'name'} and {ticketFieldLabel.toLowerCase()}.</p>
+                  <label htmlFor="scramble-participant-name">{game.nameLabel?.trim() || 'Your name'}</label>
+                  <input id="scramble-participant-name" autoComplete="name" maxLength={80} value={participantName} onChange={(event) => setParticipantName(event.target.value)} placeholder={game.nameLabel?.trim() ? `Enter your ${game.nameLabel.trim().toLowerCase()}` : 'Enter your name'} required />
                   <label htmlFor="scramble-ticket-number">{ticketFieldLabel}</label>
                   <input id="scramble-ticket-number" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder={`Enter your ${ticketFieldLabel.toLowerCase()}`} required />
                   {error && <p className="raffle-notice raffle-error" role="alert">{error}</p>}
@@ -507,6 +508,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
 
   const [title, setTitle] = useState('')
   const [ticketLabel, setTicketLabel] = useState('')
+  const [nameLabel, setNameLabel] = useState('')
   const [answerDraft, setAnswerDraft] = useState('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState('')
@@ -611,6 +613,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
     const body = new FormData()
     body.append('title', title.trim())
     if (ticketLabel.trim()) body.append('ticketLabel', ticketLabel.trim())
+    if (nameLabel.trim()) body.append('nameLabel', nameLabel.trim())
     body.append('answer', answerDraft.trim())
     if (logoFile) body.append('logo', logoFile)
     if (displayImage1) body.append('displayImage1', displayImage1)
@@ -621,6 +624,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
       setSelectedId(created.id)
       setTitle('')
       setTicketLabel('')
+      setNameLabel('')
       setAnswerDraft('')
       setLogoFile(null)
       setLogoPreview('')
@@ -822,6 +826,9 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
               <h2>Create a word scramble</h2>
               <label htmlFor="scramble-title">Event or game name</label>
               <input id="scramble-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={3} maxLength={120} placeholder="e.g. Lay Bare x PVL Game Night" required />
+              <label htmlFor="scramble-name-label">Guest name field label</label>
+              <input id="scramble-name-label" value={nameLabel} onChange={(event) => setNameLabel(event.target.value)} maxLength={40} placeholder="Your name" />
+              <p className="raffle-help">Shown on guest registration. Leave blank for Your name.</p>
               <label htmlFor="scramble-ticket-label">Ticket number label</label>
               <input id="scramble-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
               <p className="raffle-help">Shown on guest registration and the open display. Leave blank for Ticket number.</p>

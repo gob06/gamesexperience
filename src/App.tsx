@@ -190,6 +190,7 @@ function App() {
   const [polls, setPolls] = useState<Poll[]>([])
   const [question, setQuestion] = useState('')
   const [ticketLabel, setTicketLabel] = useState('')
+  const [nameLabel, setNameLabel] = useState('')
   const [options, setOptions] = useState<OptionDraft[]>(emptyOptionDrafts)
   const [hideNames, setHideNames] = useState(false)
   const [correctOptionIndex, setCorrectOptionIndex] = useState<number | null>(null)
@@ -381,6 +382,7 @@ function App() {
       formData.append('isQa', String(isQaMode))
       formData.append('revealCorrect', String(isQaMode && revealCorrect))
       if (isQaMode && ticketLabel.trim()) formData.append('ticketLabel', ticketLabel.trim())
+      if (isQaMode && nameLabel.trim()) formData.append('nameLabel', nameLabel.trim())
       const optionImages: File[] = []
       formData.append('options', JSON.stringify(cleanOptions.map((option) => {
         const imageIndex = option.imageFile ? optionImages.push(option.imageFile) - 1 : null
@@ -398,6 +400,7 @@ function App() {
       setPolls((current) => [result, ...current])
       setQuestion('')
       setTicketLabel('')
+      setNameLabel('')
       options.forEach((option) => { if (option.previewUrl) URL.revokeObjectURL(option.previewUrl) })
       setOptions(emptyOptionDrafts())
       setCorrectOptionIndex(null)
@@ -561,6 +564,9 @@ function App() {
               )}
               {isQaMode && (
                 <>
+                  <label className="field-label" htmlFor="qa-name-label">Guest name field label</label>
+                  <input id="qa-name-label" value={nameLabel} onChange={(event) => setNameLabel(event.target.value)} maxLength={40} placeholder="Full name" />
+                  <span className="field-hint">Shown on guest registration. Leave blank for Full name.</span>
                   <label className="field-label" htmlFor="qa-ticket-label">Ticket number label</label>
                   <input id="qa-ticket-label" value={ticketLabel} onChange={(event) => setTicketLabel(event.target.value)} maxLength={40} placeholder="Ticket number" />
                   <span className="field-hint">Shown on guest registration and the open display. Leave blank for Ticket number.</span>

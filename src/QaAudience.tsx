@@ -9,6 +9,7 @@ export type QaPoll = {
   id: string
   question: string
   ticketLabel?: string | null
+  nameLabel?: string | null
   questionImageUrl?: string | null
   options: Array<{ id: string; label: string; imageUrl?: string | null }>
   votingEnabled: boolean
@@ -225,7 +226,7 @@ export default function QaAudience({ pollId, initialPoll }: { pollId: string; in
         <div className="vote-card-kicker"><span className="live-indicator" /> LIVE Q&amp;A</div>
         <h1>Join the game</h1>
         <p className="vote-instruction">{poll.votingEnabled ? 'Enter your details to see the question.' : 'This Q&A is not open yet. Check back soon.'}</p>
-        <label className="qa-name-label" htmlFor="qa-full-name">Full name<input id="qa-full-name" className="qa-name-input" type="text" autoComplete="name" maxLength={80} value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your full name" required disabled={!poll.votingEnabled} /></label>
+        <label className="qa-name-label" htmlFor="qa-full-name">{poll.nameLabel?.trim() || 'Full name'}<input id="qa-full-name" className="qa-name-input" type="text" autoComplete="name" maxLength={80} value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder={poll.nameLabel?.trim() ? `Your ${poll.nameLabel.trim().toLowerCase()}` : 'Your full name'} required disabled={!poll.votingEnabled} /></label>
         <label className="qa-name-label" htmlFor="qa-ticket-number">{ticketFieldLabel}<input id="qa-ticket-number" className="qa-name-input" type="text" autoComplete="off" maxLength={40} value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} placeholder={`Your ${ticketFieldLabel.toLowerCase()}`} required disabled={!poll.votingEnabled} /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="button button-primary submit-vote" type="submit" disabled={busy || !poll.votingEnabled || !fullName.trim() || !ticketNumber.trim()}>Continue <ArrowUpRight size={17} /></button>
