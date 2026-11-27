@@ -43,7 +43,7 @@ When creating a raffle, word scramble, or Q&A, optionally set the guest name fie
 
 Raffle and word scramble open displays show ticket values without the ticket-number label; guest registration and host pages retain the configured label.
 
-When creating a raffle or word scramble, choose text or an uploaded/image-bank image for the event name on the open display. The activity name remains required for host and guest pages, and the QR logo is separate. Existing activities continue to show their text name. Images must be JPEG, PNG, or WebP (up to 5 MB); restart the API after updating to add the new database columns.
+When creating a raffle or word scramble, choose text or an uploaded/image-bank image for the event name on the open display. Text mode requires an activity name; image mode requires an image and makes the activity name optional. If left blank in image mode, host and guest pages use "QR Raffle" or "QR Word Scramble". The QR logo is separate. Existing activities continue to show their text name. Images must be JPEG, PNG, or WebP (up to 5 MB); restart the API after updating to add the new database columns.
 
 In Appearance, the raffle, word scramble, and Selfie Cam display settings offer optional box color and opacity controls. They affect the open display only; Selfie Cam applies them to both the photo wall and QR panel while keeping the QR code readable. Save and publish the theme to make changes visible to guests.
 

@@ -115,6 +115,32 @@ test('announcing winners reveals the answer together with only announced winners
   textForm.append('answer', 'APPLE')
   const textGame = await (await fetch(`${base}/api/scrambles`, { method: 'POST', headers: { Cookie: cookie }, body: textForm })).json()
   assert.equal(textGame.displayTitleImageUrl, null)
+  for (const [mode, title, withImage, expectedStatus] of [
+    ['image', '', true, 201],
+    ['image', 'A', true, 201],
+    ['image', '', false, 400],
+    ['image', 'Named game', false, 400],
+    ['text', '', false, 400],
+    ['text', 'AB', false, 400],
+    ['text', 'Named game', true, 400],
+    ['invalid', 'Named game', false, 400],
+    ['image', 'x'.repeat(121), true, 400],
+  ]) {
+    const modeForm = new FormData()
+    modeForm.append('title', title)
+    modeForm.append('displayTitleMode', mode)
+    modeForm.append('answer', 'APPLE')
+    if (withImage) modeForm.append('displayTitleImage', new Blob([png], { type: 'image/png' }), 'title.png')
+    const result = await fetch(`${base}/api/scrambles`, { method: 'POST', headers: { Cookie: cookie }, body: modeForm })
+    assert.equal(result.status, expectedStatus, `${mode}: title length ${title.length}, image ${withImage}`)
+    const body = await result.json()
+    if (expectedStatus === 201) {
+      assert.equal(body.title, title || 'QR Word Scramble')
+      assert.ok(body.displayTitleImageUrl)
+    } else {
+      assert.ok(body.error)
+    }
+  }
   assert.equal((await (await fetch(`${base}${url}/display`)).json()).game.ticketLabel, 'Seat number')
   assert.equal(game.logoUrl, `${url}/logo?version=1`)
   assert.equal(game.displayLogoUrl, `${url}/display-logo?version=1`)

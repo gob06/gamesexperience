@@ -16,7 +16,7 @@ export function DisplayEventTitleChoice({ useImage, onModeChange, file, onChange
         <label><input type="radio" name={name} checked={!useImage} onChange={() => { onModeChange(false); onError('') }} /> Text</label>
         <label><input type="radio" name={name} checked={useImage} onChange={() => { onModeChange(true); onError('') }} /> Image</label>
       </fieldset>
-      <p className="raffle-help">The activity name is still used on host and guest pages. The QR logo is separate.</p>
+      <p className="raffle-help">{useImage ? 'An image is required. The activity name is optional; leave it blank to use the activity type on host and guest pages.' : 'Enter an activity name to show as text on the open display.'} The QR logo is separate.</p>
       {useImage && <DisplayImagePicker label="Display event name image" file={file} onChange={onChange} onError={onError} required />}
     </>
   )

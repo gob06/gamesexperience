@@ -620,6 +620,7 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
     setNotice('')
     const body = new FormData()
     body.append('title', title.trim())
+    body.append('displayTitleMode', useTitleImage ? 'image' : 'text')
     if (ticketLabel.trim()) body.append('ticketLabel', ticketLabel.trim())
     if (nameLabel.trim()) body.append('nameLabel', nameLabel.trim())
     body.append('answer', answerDraft.trim())
@@ -835,8 +836,8 @@ export function ScrambleHostPage({ user, onLogout }: { user: { username: string 
           <aside className="raffle-sidebar">
             <form className="raffle-create-form" onSubmit={(event) => void createGame(event)}>
               <h2>Create a word scramble</h2>
-              <label htmlFor="scramble-title">Event or game name</label>
-              <input id="scramble-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={3} maxLength={120} placeholder="e.g. Lay Bare x PVL Game Night" required />
+              <label htmlFor="scramble-title">Event or game name{useTitleImage ? ' (optional)' : ''}</label>
+              <input id="scramble-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={useTitleImage ? undefined : 3} maxLength={120} placeholder="e.g. Lay Bare x PVL Game Night" required={!useTitleImage} />
               <DisplayEventTitleChoice useImage={useTitleImage} onModeChange={setUseTitleImage} file={titleImage} onChange={setTitleImage} onError={setError} />
               <label htmlFor="scramble-name-label">Guest name field label</label>
               <input id="scramble-name-label" value={nameLabel} onChange={(event) => setNameLabel(event.target.value)} maxLength={40} placeholder="Your name" />

@@ -57,14 +57,19 @@ export function registerRaffleRoutes({ app, database, requireUser, imageUpload, 
   const createUpload = imageUpload.fields([{ name: 'logo', maxCount: 1 }, { name: 'displayTitleImage', maxCount: 1 }, { name: 'displayImage1', maxCount: 1 }, { name: 'displayImage2', maxCount: 1 }])
 
   app.post('/api/raffles', requireUser, createUpload, async (request, response) => {
-    const title = typeof request.body.title === 'string' ? request.body.title.trim() : ''
-    if (title.length < 3 || title.length > 120) return response.status(400).json({ error: 'Raffle title must be between 3 and 120 characters.' })
+    const titleInput = typeof request.body.title === 'string' ? request.body.title.trim() : ''
+    const displayTitleImage = request.files?.displayTitleImage?.[0]
+    const displayTitleMode = request.body.displayTitleMode ?? (displayTitleImage ? 'image' : 'text')
+    if (!['text', 'image'].includes(displayTitleMode)) return response.status(400).json({ error: 'Choose text or image for the open display event name.' })
+    if (displayTitleMode === 'image' && !displayTitleImage) return response.status(400).json({ error: 'Choose an image for the open display event name.' })
+    if (displayTitleMode === 'text' && displayTitleImage) return response.status(400).json({ error: 'An event name image cannot be used in text mode.' })
+    if (titleInput.length > 120 || (displayTitleMode === 'text' && titleInput.length < 3)) return response.status(400).json({ error: 'Raffle title must be between 3 and 120 characters in text mode, or at most 120 characters in image mode.' })
+    const title = titleInput || 'QR Raffle'
     const ticketLabel = typeof request.body.ticketLabel === 'string' ? request.body.ticketLabel.trim() : ''
     if (ticketLabel.length > 40) return response.status(400).json({ error: 'Ticket number label must be 40 characters or fewer.' })
     const nameLabel = request.body.nameLabel === undefined ? '' : typeof request.body.nameLabel === 'string' ? request.body.nameLabel.trim() : null
     if (nameLabel === null || nameLabel.length > 40) return response.status(400).json({ error: 'Guest name label must be 40 characters or fewer.' })
     const logo = request.files?.logo?.[0]
-    const displayTitleImage = request.files?.displayTitleImage?.[0]
     const displayImage1 = request.files?.displayImage1?.[0]
     const displayImage2 = request.files?.displayImage2?.[0]
     for (const [file, label] of [[logo, 'QR logo'], [displayTitleImage, 'Display event name image'], [displayImage1, 'Display image 1'], [displayImage2, 'Display image 2']]) {

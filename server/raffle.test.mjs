@@ -130,6 +130,31 @@ test('raffle draws persist the requested number of distinct winners and expose t
   textForm.append('title', 'Text raffle')
   const textRaffle = await (await fetch(`${base}/api/raffles`, { method: 'POST', headers: { Cookie: cookie }, body: textForm })).json()
   assert.equal(textRaffle.displayTitleImageUrl, null)
+  for (const [mode, title, withImage, expectedStatus] of [
+    ['image', '', true, 201],
+    ['image', 'A', true, 201],
+    ['image', '', false, 400],
+    ['image', 'Named raffle', false, 400],
+    ['text', '', false, 400],
+    ['text', 'AB', false, 400],
+    ['text', 'Named raffle', true, 400],
+    ['invalid', 'Named raffle', false, 400],
+    ['image', 'x'.repeat(121), true, 400],
+  ]) {
+    const modeForm = new FormData()
+    modeForm.append('title', title)
+    modeForm.append('displayTitleMode', mode)
+    if (withImage) modeForm.append('displayTitleImage', new Blob([png], { type: 'image/png' }), 'title.png')
+    const result = await fetch(`${base}/api/raffles`, { method: 'POST', headers: { Cookie: cookie }, body: modeForm })
+    assert.equal(result.status, expectedStatus, `${mode}: title length ${title.length}, image ${withImage}`)
+    const body = await result.json()
+    if (expectedStatus === 201) {
+      assert.equal(body.title, title || 'QR Raffle')
+      assert.ok(body.displayTitleImageUrl)
+    } else {
+      assert.ok(body.error)
+    }
+  }
   const display = async () => {
     const response = await fetch(`${base}${url}/display`)
     assert.equal(response.status, 200)

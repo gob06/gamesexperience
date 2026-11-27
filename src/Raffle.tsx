@@ -459,6 +459,7 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
     setNotice('')
     const data = new FormData()
     data.append('title', title.trim())
+    data.append('displayTitleMode', useTitleImage ? 'image' : 'text')
     if (ticketLabel.trim()) data.append('ticketLabel', ticketLabel.trim())
     if (nameLabel.trim()) data.append('nameLabel', nameLabel.trim())
     if (logoFile) data.append('logo', logoFile)
@@ -675,8 +676,8 @@ export function RaffleHostPage({ user, onLogout }: { user: { username: string };
           <aside className="raffle-sidebar">
             <form className="raffle-create-form" onSubmit={(event) => void createRaffle(event)}>
               <h2>Create a raffle</h2>
-              <label htmlFor="raffle-title">Event or raffle name</label>
-              <input id="raffle-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={3} maxLength={120} placeholder="e.g. Championship night" required />
+              <label htmlFor="raffle-title">Event or raffle name{useTitleImage ? ' (optional)' : ''}</label>
+              <input id="raffle-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={useTitleImage ? undefined : 3} maxLength={120} placeholder="e.g. Championship night" required={!useTitleImage} />
               <DisplayEventTitleChoice useImage={useTitleImage} onModeChange={setUseTitleImage} file={titleImage} onChange={setTitleImage} onError={setError} />
               <label htmlFor="raffle-name-label">Guest name field label</label>
               <input id="raffle-name-label" value={nameLabel} onChange={(event) => setNameLabel(event.target.value)} maxLength={40} placeholder="Ticket holder name" />
