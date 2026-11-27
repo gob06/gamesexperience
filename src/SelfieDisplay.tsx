@@ -7,7 +7,7 @@ import { readSelfieJson } from './selfieResponse'
 import { getDisplayPresentation, useTheme } from './theme'
 
 type Submission = { id: string; status: 'pending' | 'approved'; createdAt: string; approvedAt?: string | null }
-type QrSession = { id: string; joinToken: string; paused: boolean }
+type QrSession = { id: string; joinToken: string; paused: boolean; qrLogoUrl?: string | null }
 
 export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' }: { sessionId: string; joinToken: string; displayToken?: string }) {
   const { theme, assetUrls } = useTheme()
@@ -20,7 +20,7 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
   const [error, setError] = useState('')
   const [qrError, setQrError] = useState('')
   const qrToken = ongoingQr?.joinToken || (!closed ? joinToken : '')
-  const qrSessionId = ongoingQr?.id || (!closed ? sessionId : '')
+  const qrLogoUrl = ongoingQr?.qrLogoUrl || ''
   const joinUrl = preparedQr.token === qrToken ? preparedQr.url : ''
 
   useEffect(() => {
@@ -37,15 +37,15 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
     const canvas = qrRef.current
     if (!canvas || !joinUrl) return
     let active = true
-    const logoUrl = localStorage.getItem(`selfie-qr-logo:${qrSessionId}`)
+    setQrError('')
     void QRCode.toCanvas(canvas, joinUrl, { width: 480, margin: 2, errorCorrectionLevel: 'H', color: { dark: '#15151a', light: '#ffffff' } }).then(() => {
-      if (!active || !logoUrl) return
+      if (!active || !qrLogoUrl) return
       const logo = new Image()
       logo.onload = () => {
         if (!active) return
         const context = canvas.getContext('2d')
         if (!context) return
-        const boxSize = 200
+        const boxSize = Math.round(canvas.width * 0.23)
         const padding = Math.round(canvas.width * 0.025)
         const innerSize = boxSize - padding * 2
         const scale = Math.min(innerSize / logo.naturalWidth, innerSize / logo.naturalHeight)
@@ -55,12 +55,13 @@ export default function SelfieDisplay({ sessionId, joinToken, displayToken = '' 
         context.fillRect((canvas.width - boxSize) / 2, (canvas.height - boxSize) / 2, boxSize, boxSize)
         context.drawImage(logo, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height)
       }
-      logo.src = logoUrl
+      logo.onerror = () => { if (active) setQrError('Could not load the selfie QR logo. Reopen the session on the host page to save it again.') }
+      logo.src = qrLogoUrl
     }).catch((caught: unknown) => {
       if (active) setQrError(caught instanceof Error ? caught.message : 'Could not generate the QR code.')
     })
     return () => { active = false }
-  }, [joinUrl, qrSessionId])
+  }, [joinUrl, qrLogoUrl])
 
   useEffect(() => {
     let active = true

@@ -71,8 +71,15 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal(hostLogin.status, 200)
   const hostCookie = hostLogin.headers.get('set-cookie').split(';')[0]
   const hostHeaders = { Cookie: hostCookie }
-  async function createSession() {
-    const response = await fetch(`${base}/api/selfie/sessions`, { method: 'POST', headers: { Cookie: cookie } })
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aAX8AAAAASUVORK5CYII=', 'base64')
+  async function createSession(withLogo = false) {
+    const form = new FormData()
+    form.append('santaEnabled', 'false')
+    if (withLogo) {
+      form.append('qrLogo', new Blob([png], { type: 'image/png' }), 'qr-logo.png')
+      form.append('banner', new Blob([png], { type: 'image/png' }), 'guest-photo.png')
+    }
+    const response = await fetch(`${base}/api/selfie/sessions`, { method: 'POST', headers: { Cookie: cookie }, ...(withLogo ? { body: form } : {}) })
     assert.equal(response.status, 201)
     const session = await response.json()
     assert.match(session.displayToken, /^[A-Za-z0-9_-]{43}$/)
@@ -80,7 +87,21 @@ test('selfie sessions end manually and retain private history and approved OBS p
     assert.equal('expiresAt' in session, false)
     return session
   }
-  const session = await createSession()
+  const session = await createSession(true)
+  assert.ok(session.qrLogoUrl)
+  assert.deepEqual(Buffer.from(await (await fetch(`${base}${session.qrLogoUrl}`)).arrayBuffer()), png)
+  assert.deepEqual(Buffer.from(await (await fetch(`${base}/api/selfie/join/${session.joinToken}/banner`)).arrayBuffer()), png)
+  const initialDisplay = await (await fetch(`${base}/api/selfie/display/${session.id}/submissions`, { headers: { 'X-Selfie-Display-Token': session.displayToken } })).json()
+  assert.ok(initialDisplay.qrSession.qrLogoUrl)
+  assert.deepEqual(Buffer.from(await (await fetch(`${base}${initialDisplay.qrSession.qrLogoUrl}`)).arrayBuffer()), png)
+  const initialHost = await (await fetch(`${base}/api/selfie/sessions/${session.id}/submissions`, { headers: { Cookie: cookie } })).json()
+  assert.equal(initialHost.qrSession.qrLogoUrl, initialDisplay.qrSession.qrLogoUrl)
+  const beforeInvalid = (await (await fetch(`${base}/api/selfie/sessions`, { headers: { Cookie: cookie } })).json()).sessions.length
+  const invalidCreate = new FormData()
+  invalidCreate.append('santaEnabled', 'false')
+  invalidCreate.append('qrLogo', new Blob(['invalid'], { type: 'image/png' }), 'invalid.png')
+  assert.equal((await fetch(`${base}/api/selfie/sessions`, { method: 'POST', headers: { Cookie: cookie }, body: invalidCreate })).status, 400)
+  assert.equal((await (await fetch(`${base}/api/selfie/sessions`, { headers: { Cookie: cookie } })).json()).sessions.length, beforeInvalid)
   const otherSession = await createSession()
   const normalStatus = await (await fetch(`${base}/api/selfie/join/${session.joinToken}/status`)).json()
   assert.equal(normalStatus.santaEnabled, false)
@@ -103,7 +124,29 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal(stored.display_token_hash.length, 64)
   assert.notEqual(stored.display_token_hash, session.displayToken)
   const image = Buffer.from('test-image')
-  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aAX8AAAAASUVORK5CYII=', 'base64')
+  const logoEndpoint = `${base}/api/selfie/sessions/${session.id}/qr-logo`
+  const logoForm = () => {
+    const form = new FormData()
+    form.append('image', new Blob([png], { type: 'image/png' }), 'qr-logo.png')
+    return form
+  }
+  assert.equal((await fetch(logoEndpoint, { method: 'POST', body: logoForm() })).status, 401)
+  assert.equal((await fetch(logoEndpoint, { method: 'POST', headers: hostHeaders, body: logoForm() })).status, 404)
+  const invalidLogo = new FormData()
+  invalidLogo.append('image', new Blob(['invalid'], { type: 'image/png' }), 'invalid.png')
+  assert.equal((await fetch(logoEndpoint, { method: 'POST', headers: { Cookie: cookie }, body: invalidLogo })).status, 400)
+  const savedLogo = await fetch(logoEndpoint, { method: 'POST', headers: { Cookie: cookie }, body: logoForm() })
+  assert.equal(savedLogo.status, 200)
+  const logoVersion = (await savedLogo.json()).version
+  const publicLogo = await fetch(`${base}/api/selfie/join/${session.joinToken}/qr-logo`)
+  assert.equal(publicLogo.status, 200)
+  assert.equal(publicLogo.headers.get('content-type'), 'image/png')
+  assert.equal(publicLogo.headers.get('cache-control'), 'no-store')
+  assert.deepEqual(Buffer.from(await publicLogo.arrayBuffer()), png)
+  assert.equal((await fetch(`${base}/api/selfie/join/${otherSession.joinToken}/qr-logo`)).status, 404)
+  assert.equal((await fetch(`${base}/api/selfie/join/${'x'.repeat(43)}/qr-logo`)).status, 404)
+  const logoLinks = await (await fetch(`${base}/api/selfie/sessions/${session.id}/links`, { method: 'POST', headers: { Cookie: cookie } })).json()
+  assert.equal((await fetch(`${base}${logoLinks.qrLogoUrl}`)).status, 200)
   async function upload(token) {
     const form = new FormData()
     form.append('image', new Blob([png], { type: 'image/png' }), 'selfie.png')
@@ -143,6 +186,11 @@ test('selfie sessions end manually and retain private history and approved OBS p
   assert.equal(result.closed, false)
   assert.equal(result.qrSession.id, session.id)
   assert.equal(result.qrSession.paused, false)
+  assert.ok(result.qrSession.qrLogoUrl.endsWith(`?v=${logoVersion}`))
+  assert.deepEqual(Buffer.from(await (await fetch(`${base}${result.qrSession.qrLogoUrl}`)).arrayBuffer()), png)
+  const changedLogo = await (await fetch(logoEndpoint, { method: 'POST', headers: { Cookie: cookie }, body: logoForm() })).json()
+  assert.notEqual(changedLogo.version, logoVersion)
+  assert.ok((await (await fetch(displayBase, { headers })).json()).qrSession.qrLogoUrl.endsWith(`?v=${changedLogo.version}`))
   assert.equal((await fetch(`${base}/api/selfie/join/${result.qrSession.joinToken}/status`)).status, 200)
   const photoUrl = (id, token = session.displayToken) => `${displayBase}/${id}/image?token=${token}`
   const photo = await fetch(photoUrl('approved-photo'))
@@ -241,6 +289,7 @@ test('selfie sessions end manually and retain private history and approved OBS p
   const endedBody = await endedDisplay.json()
   assert.equal(endedBody.closed, true)
   assert.equal(endedBody.qrSession.id, newestSession.id)
+  assert.equal(endedBody.qrSession.qrLogoUrl, null, 'ended displays must not reuse the previous session logo')
   assert.equal(endedBody.qrSession.paused, false)
   assert.match(endedBody.qrSession.joinToken, /^[A-Za-z0-9_-]{43}$/)
   assert.deepEqual(endedBody.submissions.map((item) => item.id), ['other-photo'])
@@ -291,6 +340,7 @@ test('selfie sessions end manually and retain private history and approved OBS p
   const restartedQr = (await (await fetch(displayBase, { headers })).json()).qrSession
   assert.equal((await (await fetch(displayBase, { headers })).json()).rotationSeconds, 12)
   assert.equal(restartedQr.joinToken, endedBody.qrSession.joinToken)
+  assert.deepEqual(Buffer.from(await (await fetch(`${base}${logoLinks.qrLogoUrl}`)).arrayBuffer()), png, 'saved QR logos survive API restarts')
   assert.equal((await fetch(`${base}/api/selfie/join/${restartedQr.joinToken}/status`)).status, 200)
   assert.ok(database.prepare('SELECT live_join_token_hash FROM selfie_sessions WHERE id = ?').get(newestSession.id).live_join_token_hash)
   assert.equal((await fetch(`${historyUrl}/${newestSession.id}/close`, { method: 'POST', headers: adminHeaders })).status, 204)

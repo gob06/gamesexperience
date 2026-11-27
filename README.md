@@ -47,6 +47,8 @@ When creating a raffle or word scramble, choose text or an uploaded/image-bank i
 
 Event-name logos use a centered 900 x 200 px image area on raffle and word scramble open displays. Images fit without cropping or stretching. The area scales down proportionally when the screen or center column between side images is narrower than 900 px.
 
+The QR logo selected before **Create selfie QR code** is saved together with the session on the server and used by the host QR preview, **Open live screen**, and **Copy OBS URL**. OBS does not need a host login or browser-local storage. Reopen older sessions in the browser where their logo was selected to migrate it, or upload/select a QR logo on the session page. Restart the API after updating to add the logo storage columns.
+
 In Appearance, the raffle, word scramble, and Selfie Cam display settings offer optional box color and opacity controls. They affect the open display only; Selfie Cam applies them to both the photo wall and QR panel while keeping the QR code readable. Save and publish the theme to make changes visible to guests.
 
 The signed-out login page uses the superadmin's published appearance. To change it, sign in as the superadmin, update the appearance, and publish the theme. Before the first account is created, the login and setup page use the original shared theme.

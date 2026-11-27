@@ -19,7 +19,7 @@ const SantaOverlay = lazy(() => import('./SantaOverlay').catch((error: unknown) 
   return { default: SantaLoadError }
 }))
 
-type SelfieSession = { id: string; joinToken: string; displayToken: string; createdAt: string; closedAt: string | null; paused: boolean; rotationSeconds: number }
+type SelfieSession = { id: string; joinToken: string; displayToken: string; createdAt: string; closedAt: string | null; paused: boolean; rotationSeconds: number; qrLogoUrl?: string | null }
 type RecentSession = { id: string; host: string; createdAt: string; closedAt: string | null; paused: boolean; photoCount: number; approvedCount: number; santaEnabled: boolean }
 type SelfieSubmission = { id: string; fileName: string; status: 'pending' | 'approved'; createdAt: string }
 
@@ -100,12 +100,36 @@ export default function SelfieCam() {
       setSubmissions([])
       setSubmissionsError('')
       setDisplaySubmission(null)
-      setQrLogoUrl(localStorage.getItem(`selfie-qr-logo:${result.id}`) || '')
+      setQrLogoUrl(result.qrLogoUrl || '')
+      if (!result.qrLogoUrl) {
+        const legacyLogo = localStorage.getItem(`selfie-qr-logo:${result.id}`)
+        if (legacyLogo) {
+          await persistQrLogo(result, legacyLogo)
+          localStorage.removeItem(`selfie-qr-logo:${result.id}`)
+        }
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not open this selfie session.')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function persistQrLogo(target: SelfieSession, source: string) {
+    const imageResponse = await fetch(source)
+    if (!imageResponse.ok) throw new Error('Could not load the selected selfie QR logo.')
+    const form = new FormData()
+    form.append('image', await imageResponse.blob(), 'qr-logo.png')
+    const response = await fetch(`/api/selfie/sessions/${encodeURIComponent(target.id)}/qr-logo`, { method: 'POST', body: form })
+    if (!response.ok) {
+      const result = await readSelfieJson<{ error?: string }>(response, 'Could not save the selfie QR logo')
+      throw new Error(result.error || 'Could not save the selfie QR logo. Update and restart the API, then reopen the session.')
+    }
+    const result = await readSelfieJson<{ version: string }>(response, 'Could not read the saved selfie QR logo')
+    if (typeof result.version !== 'string' || !result.version) throw new Error('The API did not return the saved QR logo version. Update and restart the API.')
+    const url = `/api/selfie/join/${encodeURIComponent(target.joinToken)}/qr-logo?v=${encodeURIComponent(result.version)}`
+    setSession((current) => current?.id === target.id ? { ...current, qrLogoUrl: url } : current)
+    setQrLogoUrl(url)
   }
 
   async function togglePause() {
@@ -141,7 +165,8 @@ export default function SelfieCam() {
     logoUrlRef.current = url
     setQrLogoUrl(url)
     setError('')
-    void saveLogo(file)
+    void saveLogo(file).then((saved) => { if (!saved) setError('QR logo selected, but could not be saved to the image bank.') })
+    if (session) void updateQrLogo(session, url)
   }
 
   function useSavedLogo(logo: SavedLogo) {
@@ -149,6 +174,19 @@ export default function SelfieCam() {
     logoUrlRef.current = logo.dataUrl
     setQrLogoUrl(logo.dataUrl)
     setError('')
+    if (session) void updateQrLogo(session, logo.dataUrl)
+  }
+
+  async function updateQrLogo(target: SelfieSession, source: string) {
+    setLoading(true)
+    try {
+      await persistQrLogo(target, source)
+      setNotice('QR logo saved for the live screen and OBS.')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save the selfie QR logo.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function useSavedBanner(logo: SavedLogo) {
@@ -180,31 +218,22 @@ export default function SelfieCam() {
     setError('')
     setNotice('')
     try {
-      const response = await fetch('/api/selfie/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ santaEnabled }) })
+      const form = new FormData()
+      form.append('santaEnabled', String(santaEnabled))
+      if (qrLogoUrl) {
+        const logoResponse = await fetch(qrLogoUrl)
+        if (!logoResponse.ok) throw new Error('Could not load the selected QR logo. Select it again before creating the session.')
+        form.append('qrLogo', await logoResponse.blob(), 'qr-logo.png')
+      }
+      if (bannerFile) form.append('banner', bannerFile)
+      const response = await fetch('/api/selfie/sessions', { method: 'POST', body: form })
       const result = await readSelfieJson<SelfieSession & { error?: string }>(response, 'Could not create a selfie session')
       if (!response.ok || !result.id || !result.joinToken || !result.displayToken) throw new Error(result.error || 'Could not create a selfie session. Update and restart the server, then try again.')
-      if (bannerFile) {
-        const form = new FormData()
-        form.append('image', bannerFile)
-        await fetch(`/api/selfie/sessions/${encodeURIComponent(result.id)}/banner`, { method: 'POST', body: form }).catch(() => undefined)
-      }
+      if (qrLogoUrl && !result.qrLogoUrl) throw new Error('The API did not save the selected QR logo. Update and restart the API before creating another session.')
       const url = await getSelfieJoinUrl(result.joinToken)
-      try {
-        if (qrLogoUrl) {
-          const blob = await (await fetch(qrLogoUrl)).blob()
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(String(reader.result))
-            reader.onerror = () => reject(reader.error)
-            reader.readAsDataURL(blob)
-          })
-          localStorage.setItem(`selfie-qr-logo:${result.id}`, dataUrl)
-        }
-      } catch {
-        // The live screen simply shows a plain QR if the logo can't be stored.
-      }
       selectedSessionId.current = result.id
       setSession(result)
+      setQrLogoUrl(result.qrLogoUrl || '')
       setRotationInput(String(result.rotationSeconds))
       setSelectedPhotos([])
       setPaused(false)
@@ -278,6 +307,7 @@ export default function SelfieCam() {
         context.fillRect(left, top, boxSize, boxSize)
         context.drawImage(logo, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height)
       }
+      logo.onerror = () => { if (active) setError('Could not load the selfie QR logo.') }
       logo.src = qrLogoUrl
     }).catch((caught: unknown) => {
       if (active) setError(caught instanceof Error ? caught.message : 'Could not generate the selfie QR code.')
@@ -527,6 +557,9 @@ export default function SelfieCam() {
               <div className="selfie-session-heading"><div><span className="selfie-session-label">{session.closedAt ? 'SAVED SESSION' : 'GUEST UPLOAD QR'}</span><h2>{session.closedAt ? 'Session ended - photos saved' : 'Scan to submit a selfie'}</h2></div><div className="selfie-session-buttons"><button className="button button-secondary" type="button" disabled={loading} onClick={() => void togglePause()}>{paused ? <Play size={15} /> : <Pause size={15} />} {paused ? 'Resume display' : session.closedAt ? 'Pause display' : 'Pause session'}</button>{session.closedAt ? <button className="button button-quiet selfie-end-button" type="button" disabled={loading} onClick={() => void deleteSession()}><Trash2 size={15} /> {loading ? 'Deleting...' : 'Delete session'}</button> : <button className="button button-quiet selfie-end-button" type="button" onClick={() => void endSession()}><X size={15} /> End session</button>}</div></div>
               {paused && <p className="selfie-paused-note">{session.closedAt ? 'Display paused on its current photo.' : "Session paused — guests can't upload and the live screen is holding its current photo."}</p>}
               <div className="selfie-session-share">
+                <input ref={logoInputRef} className="selfie-file-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseQrLogo} aria-label="Upload a logo for the selfie QR code" disabled={loading} />
+                <button className="button button-secondary" type="button" disabled={loading} onClick={() => logoInputRef.current?.click()}><Upload size={15} /> {qrLogoUrl ? 'Change QR logo' : 'Upload QR logo'}</button>
+                {!loading && <SavedLogoPicker onSelect={useSavedLogo} label="Image bank (QR logo)" />}
                 {!session.closedAt && <>
                 <div className="selfie-qr-frame"><canvas ref={qrCanvasRef} aria-label="Scan this QR code to submit a selfie" /></div>
                 <p>Scan with a phone camera. Photos must be approved before they appear on screen.</p>

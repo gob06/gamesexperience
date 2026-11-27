@@ -277,6 +277,9 @@ ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS display_token_hash VARCHAR(
 ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS live_join_token_hash VARCHAR(64) NULL;
 ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS banner_mime_type VARCHAR(100) NULL;
 ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS banner LONGBLOB NULL;
+ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS qr_logo_mime_type VARCHAR(100) NULL;
+ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS qr_logo LONGBLOB NULL;
+ALTER TABLE selfie_sessions ADD COLUMN IF NOT EXISTS qr_logo_version VARCHAR(64) NULL;
 
 CREATE TABLE IF NOT EXISTS selfie_session_links (
   session_id VARCHAR(64) NOT NULL,

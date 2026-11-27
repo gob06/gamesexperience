@@ -1374,7 +1374,7 @@ app.get('/api/admin/theme/audit', requireUser, async (request, response) => {
 
 function getSelfieSessionForOwner(sessionId, user) {
   return database.prepare(`
-    SELECT id, owner_user_id AS ownerUserId, created_at AS createdAt, closed_at AS closedAt, paused, rotation_seconds AS rotationSeconds, santa_enabled AS santaEnabled
+    SELECT id, owner_user_id AS ownerUserId, created_at AS createdAt, closed_at AS closedAt, paused, rotation_seconds AS rotationSeconds, santa_enabled AS santaEnabled, qr_logo IS NOT NULL AS hasQrLogo, qr_logo_version AS qrLogoVersion
     FROM selfie_sessions
     WHERE id = ? AND (owner_user_id = ? OR ? = 1)
   `).get(sessionId, user.id, Number(user.isSuperAdmin))
@@ -1392,11 +1392,13 @@ function getSelfieSessionForJoin(token) {
 
 async function getSelfieDisplayQr(session) {
   const ongoing = await database.prepare(`
-    SELECT id, join_token_hash AS joinTokenHash, paused FROM selfie_sessions
+    SELECT id, join_token_hash AS joinTokenHash, paused, qr_logo IS NOT NULL AS hasQrLogo, qr_logo_version AS qrLogoVersion FROM selfie_sessions
     WHERE owner_user_id = ? AND closed_at IS NULL AND (? IS NOT NULL OR id = ?)
     ORDER BY created_at DESC, id DESC LIMIT 1
   `).get(session.ownerUserId, session.closedAt, session.id)
-  return ongoing ? { id: ongoing.id, joinToken: selfieLiveJoinToken(ongoing.joinTokenHash), paused: Boolean(ongoing.paused) } : null
+  if (!ongoing) return null
+  const joinToken = selfieLiveJoinToken(ongoing.joinTokenHash)
+  return { id: ongoing.id, joinToken, paused: Boolean(ongoing.paused), qrLogoUrl: ongoing.hasQrLogo ? `/api/selfie/join/${joinToken}/qr-logo?v=${ongoing.qrLogoVersion}` : null }
 }
 
 app.post('/api/selfie/sessions/:id/pause', requireUser, async (request, response) => {
@@ -1445,6 +1447,7 @@ app.post('/api/selfie/sessions/:id/links', requireUser, async (request, response
   response.set('Cache-Control', 'no-store').json({
     id: session.id, createdAt: session.createdAt, closedAt: session.closedAt,
     paused: Boolean(session.paused), rotationSeconds: session.rotationSeconds, santaEnabled: Boolean(session.santaEnabled), joinToken, displayToken,
+    qrLogoUrl: session.hasQrLogo ? `/api/selfie/join/${joinToken}/qr-logo?v=${session.qrLogoVersion}` : null,
   })
 })
 
@@ -1487,19 +1490,54 @@ app.get('/api/selfie/join/:token/status', async (request, response) => {
   response.set('Cache-Control', 'no-store').json({ paused: Boolean(row.paused), santaEnabled: Boolean(row.santaEnabled) })
 })
 
-app.post('/api/selfie/sessions', requireUser, async (request, response) => {
-  const santaEnabled = request.body?.santaEnabled ?? false
+app.post('/api/selfie/sessions', requireUser, imageUpload.fields([{ name: 'qrLogo', maxCount: 1 }, { name: 'banner', maxCount: 1 }]), async (request, response) => {
+  const rawSantaEnabled = request.body?.santaEnabled ?? false
+  const santaEnabled = request.is('multipart/form-data') && ['true', 'false'].includes(rawSantaEnabled)
+    ? rawSantaEnabled === 'true' : rawSantaEnabled
   if (typeof santaEnabled !== 'boolean') return response.status(400).json({ error: 'Santa effect must be enabled or disabled.' })
+  const qrLogo = request.files?.qrLogo?.[0]
+  const banner = request.files?.banner?.[0]
+  for (const [file, label] of [[qrLogo, 'QR logo'], [banner, 'Guest page photo']]) {
+    if (file && !hasValidImageSignature(file.mimetype, file.buffer)) {
+      return response.status(400).json({ error: `${label} must be a valid JPEG, PNG, or WebP image.` })
+    }
+  }
+  const qrLogoVersion = qrLogo ? randomUUID() : null
   const now = new Date()
   const sessionId = randomUUID()
   const joinToken = randomBytes(32).toString('base64url')
   const displayToken = randomBytes(32).toString('base64url')
   // Keep the legacy NOT NULL expiry column populated; only closed_at controls uploads.
   await database.prepare(`
-    INSERT INTO selfie_sessions (id, join_token_hash, display_token_hash, owner_user_id, created_at, expires_at, santa_enabled, live_join_token_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(sessionId, hashSessionToken(joinToken), hashSessionToken(displayToken), request.user.id, now.toISOString(), now.toISOString(), Number(santaEnabled), hashSessionToken(selfieLiveJoinToken(hashSessionToken(joinToken))))
-  response.set('Cache-Control', 'no-store').status(201).json({ id: sessionId, joinToken, displayToken, createdAt: now.toISOString(), closedAt: null, paused: false, rotationSeconds: 5, santaEnabled })
+    INSERT INTO selfie_sessions (id, join_token_hash, display_token_hash, owner_user_id, created_at, expires_at, santa_enabled, live_join_token_hash, qr_logo_mime_type, qr_logo, qr_logo_version, banner_mime_type, banner)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(sessionId, hashSessionToken(joinToken), hashSessionToken(displayToken), request.user.id, now.toISOString(), now.toISOString(), Number(santaEnabled), hashSessionToken(selfieLiveJoinToken(hashSessionToken(joinToken))), qrLogo?.mimetype || null, qrLogo?.buffer || null, qrLogoVersion, banner?.mimetype || null, banner?.buffer || null)
+  response.set('Cache-Control', 'no-store').status(201).json({
+    id: sessionId, joinToken, displayToken, createdAt: now.toISOString(), closedAt: null, paused: false, rotationSeconds: 5, santaEnabled,
+    qrLogoUrl: qrLogo ? `/api/selfie/join/${joinToken}/qr-logo?v=${qrLogoVersion}` : null,
+  })
+})
+
+app.post('/api/selfie/sessions/:id/qr-logo', requireUser, imageUpload.single('image'), async (request, response) => {
+  const session = await getSelfieSessionForOwner(request.params.id, request.user)
+  if (!session) return response.status(404).json({ error: 'This selfie session could not be found.' })
+  const { file } = request
+  if (!file || !hasValidImageSignature(file.mimetype, file.buffer)) {
+    return response.status(400).json({ error: 'Upload a valid JPEG, PNG, or WebP QR logo.' })
+  }
+  const version = randomUUID()
+  await database.prepare('UPDATE selfie_sessions SET qr_logo_mime_type = ?, qr_logo = ?, qr_logo_version = ? WHERE id = ?').run(file.mimetype, file.buffer, version, session.id)
+  response.json({ version })
+})
+
+app.get('/api/selfie/join/:token/qr-logo', async (request, response) => {
+  const token = request.params.token
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return response.status(404).end()
+  const session = await getSelfieSessionForJoin(token)
+  if (!session) return response.status(404).end()
+  const row = await database.prepare('SELECT qr_logo AS image, qr_logo_mime_type AS mimeType FROM selfie_sessions WHERE id = ?').get(session.id)
+  if (!row?.image) return response.status(404).end()
+  response.type(row.mimeType).set('X-Content-Type-Options', 'nosniff').set('Cache-Control', 'no-store').send(Buffer.from(row.image))
 })
 
 app.post('/api/selfie/sessions/:id/banner', requireUser, imageUpload.single('image'), async (request, response) => {
